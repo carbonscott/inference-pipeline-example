@@ -16,7 +16,8 @@ Usage with numactl:
 import torch
 import torch.cuda.nvtx as nvtx
 import time
-import argparse
+import hydra
+from omegaconf import DictConfig
 import numpy as np
 import psutil
 import sys
@@ -486,74 +487,25 @@ def _run_double_buffer_pipeline(pipeline, tensors, batch_size, nvtx_prefix, sync
                     print(f"  Progress: {progress:.1f}% ({batch_end}/{len(tensors)})")
 
 
-def main():
-    parser = argparse.ArgumentParser(description='GPU NUMA Pipeline Performance Test with ViT Double Buffering')
-
-    # Core parameters
-    parser.add_argument('--gpu-id', type=int, default=0,
-                        help='GPU device ID (default: 0)')
-    parser.add_argument('--shape', nargs=3, type=int, default=[3, 224, 224],
-                        help='Tensor shape as C H W (default: 3 224 224)')
-    parser.add_argument('--num-samples', type=int, default=1000,
-                        help='Number of samples to process (default: 1000)')
-    parser.add_argument('--batch-size', type=int, default=10,
-                        help='Batch size (default: 10)')
-    parser.add_argument('--warmup-samples', type=int, default=100,
-                        help='Number of warmup samples (default: 100)')
-
-    # ViT configuration parameters
-    parser.add_argument('--vit-patch-size', type=int, default=32,
-                        help='ViT patch size (default: 32)')
-    parser.add_argument('--vit-depth', type=int, default=6,
-                        help='ViT number of transformer blocks (default: 6)')
-    parser.add_argument('--vit-heads', type=int, default=8,
-                        help='ViT number of attention heads (default: 8)')
-    parser.add_argument('--vit-dim', type=int, default=512,
-                        help='ViT embedding dimension (default: 512)')
-    parser.add_argument('--vit-mlp-dim', type=int, default=2048,
-                        help='ViT MLP dimension (default: 2048)')
-
-    # Test control
-    parser.add_argument('--sync-frequency', type=int, default=10,
-                        help='Synchronization frequency for progress reporting (default: 10)')
-    parser.add_argument('--skip-warmup', action='store_true',
-                        help='Skip warmup phase for quick tests')
-    parser.add_argument('--deterministic', action='store_true',
-                        help='Enable deterministic algorithms in PyTorch')
-
-    # Memory and performance options
-    parser.add_argument('--no-pin-memory', action='store_true',
-                        help='Disable pinned memory (default: enabled)')
-
-    # Compilation options
-    parser.add_argument('--compile-model', action='store_true',
-                        help='Enable torch.compile for reduced kernel overhead (requires PyTorch 2.0+)')
-    parser.add_argument('--compile-mode', choices=['default', 'reduce-overhead', 'max-autotune'], 
-                        default='default', help='torch.compile optimization mode (default: default)')
-
-    # Profiling and automation
-    parser.add_argument('--nsys-report', type=str, default=None,
-                        help='NSYS report name for automation (deprecated - handled by shell script)')
-
-    args = parser.parse_args()
-
+@hydra.main(version_base=None, config_path=".", config_name="config")
+def main(cfg: DictConfig) -> None:
     run_pipeline_test(
-        gpu_id=args.gpu_id,
-        tensor_shape=tuple(args.shape),
-        num_samples=args.num_samples,
-        batch_size=args.batch_size,
-        warmup_samples=args.warmup_samples,
-        patch_size=args.vit_patch_size,
-        depth=args.vit_depth,
-        heads=args.vit_heads,
-        dim=args.vit_dim,
-        mlp_dim=args.vit_mlp_dim,
-        skip_warmup=args.skip_warmup,
-        deterministic=args.deterministic,
-        pin_memory=not args.no_pin_memory,
-        sync_frequency=args.sync_frequency,
-        compile_model=args.compile_model,
-        compile_mode=args.compile_mode
+        gpu_id=cfg.gpu_id,
+        tensor_shape=tuple(cfg.shape),
+        num_samples=cfg.num_samples,
+        batch_size=cfg.batch_size,
+        warmup_samples=cfg.warmup_samples,
+        patch_size=cfg.vit.patch_size,
+        depth=cfg.vit.depth,
+        heads=cfg.vit.heads,
+        dim=cfg.vit.dim,
+        mlp_dim=cfg.vit.mlp_dim,
+        skip_warmup=cfg.test.skip_warmup,
+        deterministic=cfg.test.deterministic,
+        pin_memory=cfg.performance.pin_memory,
+        sync_frequency=cfg.test.sync_frequency,
+        compile_model=cfg.performance.compile_model,
+        compile_mode=cfg.performance.compile_mode
     )
 
 if __name__ == '__main__':

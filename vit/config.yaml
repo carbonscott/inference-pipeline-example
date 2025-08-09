@@ -1,0 +1,30 @@
+# ViT Pipeline Configuration
+# Core pipeline parameters
+gpu_id: 0
+shape: [3, 224, 224]  # Tensor shape as [C, H, W]
+num_samples: 1000
+batch_size: 10
+warmup_samples: 100
+
+# ViT model configuration
+vit:
+  patch_size: 32
+  depth: 6  # Set to 0 for no-op mode
+  heads: 8
+  dim: 512
+  mlp_dim: 2048
+
+# Test control
+test:
+  sync_frequency: 10
+  skip_warmup: false
+  deterministic: false
+
+# Performance and memory settings
+performance:
+  pin_memory: true
+  compile_model: false
+  compile_mode: default  # Options: default, reduce-overhead, max-autotune
+
+# Legacy/deprecated (kept for compatibility)
+nsys_report: null

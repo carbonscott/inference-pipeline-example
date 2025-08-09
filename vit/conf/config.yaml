@@ -1,4 +1,8 @@
 # ViT Pipeline Configuration
+defaults:
+  - _self_
+  - experiment: null
+
 # Core pipeline parameters
 gpu_id: 0
 shape: [3, 224, 224]  # Tensor shape as [C, H, W]

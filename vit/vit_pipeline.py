@@ -487,7 +487,7 @@ def _run_double_buffer_pipeline(pipeline, tensors, batch_size, nvtx_prefix, sync
                     print(f"  Progress: {progress:.1f}% ({batch_end}/{len(tensors)})")
 
 
-@hydra.main(version_base=None, config_path=".", config_name="config")
+@hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig) -> None:
     run_pipeline_test(
         gpu_id=cfg.gpu_id,

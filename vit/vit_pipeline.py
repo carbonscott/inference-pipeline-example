@@ -153,7 +153,12 @@ def create_vit_model(tensor_shape, patch_size, depth, heads, dim, mlp_dim, gpu_i
     return vit_model, image_size
 
 class DoubleBufferedPipeline:
-    """Generic double buffered pipeline for H2D -> Model Compute -> D2H"""
+    """
+    Generic double buffered pipeline for H2D -> Model Compute -> D2H.
+
+    Provides a clean API with process_batch() method that handles the full pipeline.
+    Internal methods are private to encourage proper encapsulation.
+    """
 
     def __init__(self, model, batch_size, input_shape, output_shape, gpu_id, pin_memory=True):
         self.model = model
@@ -195,7 +200,7 @@ class DoubleBufferedPipeline:
             'B': torch.zeros(batch_size, *input_shape, device=f'cuda:{gpu_id}')
         }
 
-        # GPU output buffers (use output_shape)  
+        # GPU output buffers (use output_shape)
         self.gpu_output_buffers = {
             'A': torch.zeros(batch_size, *output_shape, device=f'cuda:{gpu_id}'),
             'B': torch.zeros(batch_size, *output_shape, device=f'cuda:{gpu_id}')
@@ -214,7 +219,7 @@ class DoubleBufferedPipeline:
         """Swap current buffer"""
         self.current = 'B' if self.current == 'A' else 'A'
 
-    def h2d_transfer(self, cpu_batch, batch_idx, current_batch_size, nvtx_prefix):
+    def _h2d_transfer(self, cpu_batch, batch_idx, current_batch_size, nvtx_prefix):
         """Perform H2D transfer with fine-grained event-based synchronization"""
         gpu_buffer = self.gpu_input_buffers[self.current]
         d2h_event = self.d2h_done_event[self.current]
@@ -233,7 +238,7 @@ class DoubleBufferedPipeline:
                 # Record H2D completion event for this specific buffer
                 self.h2d_stream.record_event(h2d_event)
 
-    def compute_workload(self, batch_idx, current_batch_size, nvtx_prefix):
+    def _compute_workload(self, batch_idx, current_batch_size, nvtx_prefix):
         """Perform compute workload: generic model inference or no-op"""
         gpu_input_buffer = self.gpu_input_buffers[self.current]
         gpu_output_buffer = self.gpu_output_buffers[self.current]
@@ -267,7 +272,7 @@ class DoubleBufferedPipeline:
                 # Record compute completion event for this specific buffer
                 self.compute_stream.record_event(compute_event)
 
-    def d2h_transfer(self, batch_idx, current_batch_size, nvtx_prefix):
+    def _d2h_transfer(self, batch_idx, current_batch_size, nvtx_prefix):
         """Perform D2H transfer from current buffer (only valid slice)"""
         gpu_output_buffer = self.gpu_output_buffers[self.current]
         cpu_buffer = self.cpu_output_buffers[self.current]
@@ -286,6 +291,12 @@ class DoubleBufferedPipeline:
                 # Record D2H completion event for this specific buffer
                 self.d2h_stream.record_event(d2h_event)
 
+    def process_batch(self, cpu_batch, batch_idx, current_batch_size, nvtx_prefix):
+        """Process a batch through the full H2D -> compute -> D2H pipeline"""
+        self._h2d_transfer(cpu_batch, batch_idx, current_batch_size, nvtx_prefix)
+        self._compute_workload(batch_idx, current_batch_size, nvtx_prefix)
+        self._d2h_transfer(batch_idx, current_batch_size, nvtx_prefix)
+
     def wait_for_completion(self):
         """Wait for all pipeline stages to complete"""
         self.h2d_stream.synchronize()
@@ -298,7 +309,6 @@ def run_pipeline_test(
     num_samples=1000,
     batch_size=10,
     warmup_samples=100,
-    memory_size_mb=512,
     patch_size=32,
     depth=6,
     heads=8,
@@ -307,7 +317,6 @@ def run_pipeline_test(
     skip_warmup=False,
     deterministic=False,
     pin_memory=True,
-    fill_pattern='random',
     sync_frequency=10,
     compile_model=False,
     compile_mode='default'
@@ -315,6 +324,7 @@ def run_pipeline_test(
     """
     Run comprehensive pipeline performance test with double buffering
 
+    Simple double buffered pipeline test with synthetic random data.
     When depth=0, runs in no-op mode testing only H2D/D2H performance.
     When depth>0, runs full ViT inference pipeline.
     """
@@ -342,7 +352,6 @@ def run_pipeline_test(
     print(f"Batch Size: {batch_size}")
     print(f"Total Samples: {num_samples}")
     print(f"Warmup Samples: {warmup_samples if not skip_warmup else 0}")
-    print(f"CPU Memory Pool: {memory_size_mb} MB ({fill_pattern})")
     print(f"ViT Config: patch_size={patch_size}, depth={depth}, heads={heads}, dim={dim}, mlp_dim={mlp_dim}")
     print(f"Pin Memory: {pin_memory}")
     print(f"Sync Frequency: {sync_frequency}")
@@ -370,43 +379,20 @@ def run_pipeline_test(
         if warmup_samples > original_warmup:
             print(f"Increased warmup samples to {warmup_samples} for {compile_mode} compilation mode")
 
-    # Allocate CPU memory pool
-    print(f"Allocating {memory_size_mb} MB CPU memory pool...")
-    if fill_pattern == 'random':
-        memory_pool = torch.randn(memory_size_mb * 1024 * 1024 // 4)
-    elif fill_pattern == 'sequential':
-        memory_pool = torch.arange(memory_size_mb * 1024 * 1024 // 4, dtype=torch.float32)
-    else:  # zeros
-        memory_pool = torch.zeros(memory_size_mb * 1024 * 1024 // 4)
-
-    print(f"CPU memory pool allocated: {memory_pool.element_size() * memory_pool.nelement() / 1024 / 1024:.2f} MB")
-
     # Pre-generate test data
     print("Pre-generating test data...")
     total_samples = (0 if skip_warmup else warmup_samples) + num_samples
 
     cpu_tensors = []
     for i in range(total_samples):
-        if fill_pattern == 'random':
-            tensor = torch.randn(*tensor_shape)
-        elif fill_pattern == 'sequential':
-            tensor = torch.arange(np.prod(tensor_shape), dtype=torch.float32).reshape(tensor_shape) + i
-        else:  # zeros
-            tensor = torch.zeros(*tensor_shape)
+        tensor = torch.randn(*tensor_shape)
 
         if pin_memory:
             tensor = tensor.pin_memory()
 
         cpu_tensors.append(tensor)
 
-        # Touch memory pool periodically
-        if i % 50 == 0:
-            _ = memory_pool[:(1024*1024)].sum()
-
     print(f"Generated {len(cpu_tensors)} CPU tensors")
-
-    # Free memory pool after warmup to save RAM
-    del memory_pool
 
     # Create ViT model separately
     vit_model, image_size = create_vit_model(
@@ -487,24 +473,12 @@ def _run_double_buffer_pipeline(pipeline, tensors, batch_size, nvtx_prefix, sync
             batch_tensors = tensors[batch_start:batch_end]
 
             with nvtx.range(f"{nvtx_prefix}_batch_{batch_idx}"):
-                if batch_idx == 0:
-                    # First batch: just start the pipeline
-                    pipeline.h2d_transfer(batch_tensors, batch_idx, current_batch_size, nvtx_prefix)
-                    pipeline.compute_workload(batch_idx, current_batch_size, nvtx_prefix)
-                    pipeline.d2h_transfer(batch_idx, current_batch_size, nvtx_prefix)
-                else:
-                    # Overlapped execution: start next batch while finishing previous
-                    # Swap to next buffer
+                # Swap to next buffer for all batches except the first
+                if batch_idx > 0:
                     pipeline.swap()
 
-                    # Start H2D for current batch (will wait for THIS buffer's D2H via event)
-                    pipeline.h2d_transfer(batch_tensors, batch_idx, current_batch_size, nvtx_prefix)
-
-                    # Start compute for current batch (will wait for H2D)
-                    pipeline.compute_workload(batch_idx, current_batch_size, nvtx_prefix)
-
-                    # Start D2H for current batch (will wait for compute and record event)
-                    pipeline.d2h_transfer(batch_idx, current_batch_size, nvtx_prefix)
+                # Process the batch through the full pipeline
+                pipeline.process_batch(batch_tensors, batch_idx, current_batch_size, nvtx_prefix)
 
                 # Progress reporting
                 if (batch_idx + 1) % sync_frequency == 0:
@@ -526,8 +500,6 @@ def main():
                         help='Batch size (default: 10)')
     parser.add_argument('--warmup-samples', type=int, default=100,
                         help='Number of warmup samples (default: 100)')
-    parser.add_argument('--memory-size-mb', type=int, default=512,
-                        help='CPU memory pool size in MB (default: 512)')
 
     # ViT configuration parameters
     parser.add_argument('--vit-patch-size', type=int, default=32,
@@ -552,8 +524,6 @@ def main():
     # Memory and performance options
     parser.add_argument('--no-pin-memory', action='store_true',
                         help='Disable pinned memory (default: enabled)')
-    parser.add_argument('--fill-pattern', choices=['random', 'sequential', 'zeros'], default='random',
-                        help='Memory fill pattern (default: random)')
 
     # Compilation options
     parser.add_argument('--compile-model', action='store_true',
@@ -573,7 +543,6 @@ def main():
         num_samples=args.num_samples,
         batch_size=args.batch_size,
         warmup_samples=args.warmup_samples,
-        memory_size_mb=args.memory_size_mb,
         patch_size=args.vit_patch_size,
         depth=args.vit_depth,
         heads=args.vit_heads,
@@ -582,7 +551,6 @@ def main():
         skip_warmup=args.skip_warmup,
         deterministic=args.deterministic,
         pin_memory=not args.no_pin_memory,
-        fill_pattern=args.fill_pattern,
         sync_frequency=args.sync_frequency,
         compile_model=args.compile_model,
         compile_mode=args.compile_mode

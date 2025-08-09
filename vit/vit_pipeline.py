@@ -153,13 +153,18 @@ def create_vit_model(tensor_shape, patch_size, depth, heads, dim, mlp_dim, gpu_i
     return vit_model, image_size
 
 class DoubleBufferedPipeline:
-    """Double buffered pipeline for H2D -> ViT Compute -> D2H"""
+    """Generic double buffered pipeline for H2D -> Model Compute -> D2H"""
 
-    def __init__(self, batch_size, tensor_shape, gpu_id, patch_size, depth, heads, dim, mlp_dim, pin_memory=True, compile_model=False, compile_mode='default'):
+    def __init__(self, model, batch_size, input_shape, output_shape, gpu_id, pin_memory=True):
+        self.model = model
         self.batch_size = batch_size
-        self.tensor_shape = tensor_shape
+        self.input_shape = input_shape
+        self.output_shape = output_shape
         self.gpu_id = gpu_id
         self.pin_memory = pin_memory
+
+        # Check if model is None (no-op mode)
+        self.is_noop = (self.model is None)
 
         # Create CUDA streams for pipeline stages
         self.h2d_stream = torch.cuda.Stream(device=gpu_id)
@@ -184,24 +189,22 @@ class DoubleBufferedPipeline:
             for ev in events.values():
                 ev.record()  # Record on default stream makes them signaled immediately
 
-        # Create ViT model (or None for no-op) - NOW WITH COMPILATION SUPPORT
-        self.vit_model, self.image_size = create_vit_model(
-            tensor_shape, patch_size, depth, heads, dim, mlp_dim, gpu_id, compile_model, compile_mode
-        )
-        self.is_noop = (self.vit_model is None)
-
-        # Double buffers on GPU (with ViT-compatible size)
-        C = tensor_shape[0]
-        self.gpu_buffers = {
-            'A': torch.zeros(batch_size, C, self.image_size, self.image_size, device=f'cuda:{gpu_id}'),
-            'B': torch.zeros(batch_size, C, self.image_size, self.image_size, device=f'cuda:{gpu_id}')
+        # GPU input buffers (use input_shape)
+        self.gpu_input_buffers = {
+            'A': torch.zeros(batch_size, *input_shape, device=f'cuda:{gpu_id}'),
+            'B': torch.zeros(batch_size, *input_shape, device=f'cuda:{gpu_id}')
         }
 
-        # Single contiguous pinned host buffers (better D2H bandwidth)
-        shape = (batch_size, *tensor_shape)
-        self.cpu_buffers = {
-            'A': torch.empty(shape, pin_memory=pin_memory),
-            'B': torch.empty(shape, pin_memory=pin_memory)
+        # GPU output buffers (use output_shape)  
+        self.gpu_output_buffers = {
+            'A': torch.zeros(batch_size, *output_shape, device=f'cuda:{gpu_id}'),
+            'B': torch.zeros(batch_size, *output_shape, device=f'cuda:{gpu_id}')
+        }
+
+        # CPU output buffers (use output_shape)
+        self.cpu_output_buffers = {
+            'A': torch.empty((batch_size, *output_shape), pin_memory=pin_memory),
+            'B': torch.empty((batch_size, *output_shape), pin_memory=pin_memory)
         }
 
         # Pipeline state
@@ -213,7 +216,7 @@ class DoubleBufferedPipeline:
 
     def h2d_transfer(self, cpu_batch, batch_idx, current_batch_size, nvtx_prefix):
         """Perform H2D transfer with fine-grained event-based synchronization"""
-        gpu_buffer = self.gpu_buffers[self.current]
+        gpu_buffer = self.gpu_input_buffers[self.current]
         d2h_event = self.d2h_done_event[self.current]
         h2d_event = self.h2d_done_event[self.current]
 
@@ -223,27 +226,17 @@ class DoubleBufferedPipeline:
                 if batch_idx > 0:
                     self.h2d_stream.wait_event(d2h_event)
 
-                # Copy only the valid batch size
+                # Direct copy - no preprocessing (user responsible for correct input shape)
                 for i in range(current_batch_size):
-                    tensor = cpu_batch[i]
-                    # Resize tensor to ViT-compatible size if needed
-                    if tensor.shape[-2:] != (self.image_size, self.image_size):
-                        resized_tensor = torch.nn.functional.interpolate(
-                            tensor.unsqueeze(0),
-                            size=(self.image_size, self.image_size),
-                            mode='bilinear',
-                            align_corners=False
-                        ).squeeze(0)
-                        gpu_buffer[i].copy_(resized_tensor, non_blocking=True)
-                    else:
-                        gpu_buffer[i].copy_(tensor, non_blocking=True)
+                    gpu_buffer[i].copy_(cpu_batch[i], non_blocking=True)
 
                 # Record H2D completion event for this specific buffer
                 self.h2d_stream.record_event(h2d_event)
 
     def compute_workload(self, batch_idx, current_batch_size, nvtx_prefix):
-        """Perform compute workload: ViT inference or no-op"""
-        gpu_buffer = self.gpu_buffers[self.current]
+        """Perform compute workload: generic model inference or no-op"""
+        gpu_input_buffer = self.gpu_input_buffers[self.current]
+        gpu_output_buffer = self.gpu_output_buffers[self.current]
         h2d_event = self.h2d_done_event[self.current]
         compute_event = self.compute_done_event[self.current]
 
@@ -256,16 +249,19 @@ class DoubleBufferedPipeline:
                     # No-op compute: minimal operation for stream ordering
                     with nvtx.range(f"noop_compute_{batch_idx}"):
                         # Touch the data to ensure H2D completed and maintain stream dependencies
-                        valid_gpu_slice = gpu_buffer[:current_batch_size]
-                        _ = valid_gpu_slice.sum()  # Minimal compute operation
+                        valid_input_slice = gpu_input_buffer[:current_batch_size]
+                        _ = valid_input_slice.sum()  # Minimal compute operation
+                        # For no-op, copy input to output (identity operation)
+                        gpu_output_buffer[:current_batch_size].copy_(valid_input_slice)
                 else:
-                    # Normal ViT inference
-                    valid_gpu_slice = gpu_buffer[:current_batch_size]
-                    # Run ViT inference
+                    # Generic model inference
+                    valid_input_slice = gpu_input_buffer[:current_batch_size]
                     with torch.no_grad():
-                        with nvtx.range(f"{nvtx_prefix}_vit_forward_{batch_idx}"):
-                            predictions = self.vit_model(valid_gpu_slice)
-                            # Force compute completion with a small operation
+                        with nvtx.range(f"{nvtx_prefix}_model_forward_{batch_idx}"):
+                            predictions = self.model(valid_input_slice)
+                            # Store model output in output buffer
+                            gpu_output_buffer[:current_batch_size].copy_(predictions)
+                            # CRITICAL: Force compute completion for CUDA synchronization
                             _ = predictions.sum()
 
                 # Record compute completion event for this specific buffer
@@ -273,8 +269,8 @@ class DoubleBufferedPipeline:
 
     def d2h_transfer(self, batch_idx, current_batch_size, nvtx_prefix):
         """Perform D2H transfer from current buffer (only valid slice)"""
-        gpu_buffer = self.gpu_buffers[self.current]
-        cpu_buffer = self.cpu_buffers[self.current]
+        gpu_output_buffer = self.gpu_output_buffers[self.current]
+        cpu_buffer = self.cpu_output_buffers[self.current]
         compute_event = self.compute_done_event[self.current]
         d2h_event = self.d2h_done_event[self.current]
 
@@ -283,20 +279,9 @@ class DoubleBufferedPipeline:
                 # EVENT-BASED: Wait only for THIS buffer's compute completion
                 self.d2h_stream.wait_event(compute_event)
 
-                # Copy back only the valid slice
+                # Direct copy - no postprocessing (model output already in correct shape)
                 for i in range(current_batch_size):
-                    gpu_tensor = gpu_buffer[i]
-                    # Resize back to original shape if needed
-                    if gpu_tensor.shape[-2:] != self.tensor_shape[-2:]:
-                        resized_tensor = torch.nn.functional.interpolate(
-                            gpu_tensor.unsqueeze(0),
-                            size=self.tensor_shape[-2:],
-                            mode='bilinear',
-                            align_corners=False
-                        ).squeeze(0)
-                        cpu_buffer[i].copy_(resized_tensor, non_blocking=True)
-                    else:
-                        cpu_buffer[i].copy_(gpu_tensor, non_blocking=True)
+                    cpu_buffer[i].copy_(gpu_output_buffer[i], non_blocking=True)
 
                 # Record D2H completion event for this specific buffer
                 self.d2h_stream.record_event(d2h_event)
@@ -423,9 +408,29 @@ def run_pipeline_test(
     # Free memory pool after warmup to save RAM
     del memory_pool
 
-    # Create pipeline - NOW WITH COMPILATION SUPPORT
+    # Create ViT model separately
+    vit_model, image_size = create_vit_model(
+        tensor_shape, patch_size, depth, heads, dim, mlp_dim, gpu_id, compile_model, compile_mode
+    )
+
+    # Calculate input and output shapes
+    input_shape = tensor_shape  # Original input shape
+    if vit_model is None:
+        # No-op mode: output shape same as input shape
+        output_shape = tensor_shape
+    else:
+        # ViT mode: output shape is transformer output (num_patches + 1, dim)
+        num_patches = (image_size // patch_size) ** 2
+        output_shape = (num_patches + 1, dim)
+
+    # Create generic pipeline
     pipeline = DoubleBufferedPipeline(
-        batch_size, tensor_shape, gpu_id, patch_size, depth, heads, dim, mlp_dim, pin_memory, compile_model, compile_mode
+        model=vit_model,
+        batch_size=batch_size,
+        input_shape=input_shape,
+        output_shape=output_shape,
+        gpu_id=gpu_id,
+        pin_memory=pin_memory
     )
 
     # Warmup phase

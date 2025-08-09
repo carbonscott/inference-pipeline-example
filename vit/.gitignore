@@ -1,5 +1,7 @@
 # Output directories
 outputs/
+nsys_reports/
+multirun/
 
 # Python cache
 __pycache__/

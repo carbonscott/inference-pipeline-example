@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-VIT NSys Profiler - Thin wrapper for adding NSys profiling to VIT pipeline experiments
+VIT NSys Profiler - Individual experiment profiling for systematic analysis
 
-A minimal wrapper that adds NSys profiling to your existing Hydra workflow:
-- Preserves all vit_pipeline.py arguments and functionality  
-- Organizes NSys reports by experiment name and timestamp
-- Supports multirun bulk profiling
-- Simple implementation focused on doing one thing well
+Creates individual NSys profiles for each experiment, enabling:
+- Separate analysis of each model configuration 
+- Organized output by experiment name
+- Support for both single and batch profiling
+- Sequential execution for clean profiling data
 
 Usage:
     python vit_profiler.py experiment=vit32x6x384_compiled
     python vit_profiler.py -m experiment=vit32x6x384_compiled,vit32x12x768_compiled
-    python vit_profiler.py experiment=vit32x6x384_compiled batch_size=16
+    python vit_profiler.py experiment=vit32x6x384_compiled batch_size=16 num_samples=500
 """
 
 import sys
@@ -20,31 +20,79 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-def extract_experiment_name(args):
-    """Extract experiment name from command line arguments"""
+def parse_experiment_list(args):
+    """Parse experiment list from command line arguments"""
+    # Find experiment argument
+    experiment_arg = None
     for arg in args:
         if arg.startswith('experiment='):
-            return arg.split('=', 1)[1]
-    return 'default'
+            experiment_arg = arg
+            break
+    
+    if not experiment_arg:
+        return ['default']
+    
+    # Extract experiments (handle comma-separated list)
+    exp_value = experiment_arg.split('=', 1)[1]
+    experiments = [exp.strip() for exp in exp_value.split(',')]
+    return experiments
 
-def is_multirun(args):
-    """Check if this is a multirun execution"""
-    return '-m' in args or '--multirun' in args
+def get_other_args(args):
+    """Get all arguments except experiment= and multirun flags"""
+    other_args = []
+    skip_next = False
+    
+    for i, arg in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
+            
+        if arg in ['-m', '--multirun']:
+            continue
+        elif arg.startswith('experiment='):
+            continue
+        else:
+            other_args.append(arg)
+    
+    return other_args
 
-def create_output_directory(base_name, is_multirun=False):
-    """Create organized output directory for NSys reports"""
-    base_dir = Path("nsys_reports")
-    base_dir.mkdir(exist_ok=True)
-    
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    
-    if is_multirun:
-        output_dir = base_dir / f"bulk_{timestamp}"
-    else:
-        output_dir = base_dir / base_name
-    
+def run_individual_experiment(experiment_name, other_args, base_timestamp):
+    """Run NSys profiling for a single experiment"""
+    # Create individual output directory
+    output_dir = Path("nsys_reports") / experiment_name
     output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir, timestamp
+    
+    # Build NSys command for this specific experiment
+    output_path = output_dir / f"{experiment_name}_{base_timestamp}"
+    
+    nsys_cmd = [
+        'nsys', 'profile',
+        '-o', str(output_path),
+        '--trace=cuda,nvtx',
+        '--cuda-memory-usage=true',
+        'python', 'vit_pipeline.py',
+        f'experiment={experiment_name}'
+    ] + other_args
+    
+    print(f"🔬 Profiling: {experiment_name}")
+    print(f"📁 Output: {output_path}.nsys-rep")
+    
+    # Execute the command
+    result = subprocess.run(nsys_cmd, cwd=Path.cwd())
+    
+    if result.returncode == 0:
+        # Check if file was actually created
+        nsys_file = Path(str(output_path) + ".nsys-rep")
+        if nsys_file.exists():
+            file_size = nsys_file.stat().st_size / (1024*1024)  # MB
+            print(f"✅ {experiment_name}: {file_size:.1f} MB")
+            return True, nsys_file
+        else:
+            print(f"❌ {experiment_name}: NSys file not created")
+            return False, None
+    else:
+        print(f"❌ {experiment_name}: Failed with exit code {result.returncode}")
+        return False, None
 
 def check_nsys_available():
     """Check if nsys is available in PATH"""
@@ -68,66 +116,81 @@ def main():
         print("Examples:")
         print("  python vit_profiler.py experiment=vit32x6x384_compiled")
         print("  python vit_profiler.py -m experiment=vit32x6x384_compiled,vit32x12x768_compiled")
+        print("  python vit_profiler.py experiment=vit32x6x384_compiled num_samples=500")
         sys.exit(1)
     
-    # Extract experiment info
-    experiment_name = extract_experiment_name(args)
-    multirun = is_multirun(args)
+    # Parse experiments and other arguments
+    experiments = parse_experiment_list(args)
+    other_args = get_other_args(args)
+    is_multirun = len(experiments) > 1
     
-    # Create output directory
-    output_dir, timestamp = create_output_directory(experiment_name, multirun)
+    # Create base timestamp for this profiling session
+    base_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
-    # Build NSys command
-    if multirun:
-        # For multirun, let Hydra handle the job numbering
-        output_path = output_dir / f"profile_{timestamp}"
+    print("🚀 Starting individual NSys profiling...")
+    print(f"📊 Experiments to profile: {len(experiments)}")
+    if is_multirun:
+        print(f"🔬 Running in batch mode: {', '.join(experiments[:3])}{'...' if len(experiments) > 3 else ''}")
     else:
-        output_path = output_dir / f"{experiment_name}_{timestamp}"
+        print(f"🔬 Single experiment: {experiments[0]}")
     
-    nsys_cmd = [
-        'nsys', 'profile',
-        '-o', str(output_path),
-        '--trace=cuda,nvtx',
-        '--cuda-memory-usage=true',
-        'python', 'vit_pipeline.py'
-    ] + args
-    
-    print(f"🚀 Starting NSys profiling...")
-    print(f"📁 Output directory: {output_dir}")
-    print(f"🔬 Experiment: {experiment_name}")
-    if multirun:
-        print(f"📊 Multirun mode detected")
-    print(f"⚡ Command: nsys profile [options] python vit_pipeline.py {' '.join(args)}")
+    if other_args:
+        print(f"⚙️  Additional args: {' '.join(other_args)}")
     print()
     
-    # Execute
-    result = subprocess.run(nsys_cmd, cwd=Path.cwd())
+    # Profile each experiment individually
+    successful_runs = []
+    failed_runs = []
     
-    print()  # Add spacing after execution
-    if result.returncode == 0:
-        print(f"✅ Profiling completed successfully!")
-        print(f"📁 NSys reports saved to: {output_dir}")
+    for i, experiment in enumerate(experiments, 1):
+        print(f"[{i}/{len(experiments)}] {experiment}")
         
-        # List generated files
-        nsys_files = list(output_dir.glob("*.nsys-rep"))
-        if nsys_files:
-            print("📊 Generated files:")
-            for f in sorted(nsys_files):
-                file_size = f.stat().st_size / (1024*1024)  # MB
-                print(f"   {f.name} ({file_size:.1f} MB)")
+        success, nsys_file = run_individual_experiment(experiment, other_args, base_timestamp)
         
+        if success:
+            successful_runs.append((experiment, nsys_file))
+        else:
+            failed_runs.append(experiment)
+        
+        print()  # Add spacing between experiments
+    
+    # Final summary
+    print("=" * 60)
+    print("🎯 PROFILING SUMMARY")
+    print("=" * 60)
+    
+    if successful_runs:
+        print(f"✅ Successfully profiled: {len(successful_runs)}/{len(experiments)} experiments")
         print()
-        print("💡 Next steps:")
-        print("   • Open NSys reports in NVIDIA Nsight Systems GUI")
-        print("   • Or use command line: nsys stats <report_file>")
+        print("📁 Generated NSys reports:")
         
-    else:
-        print(f"❌ Profiling failed with exit code: {result.returncode}")
-        print("💡 Troubleshooting:")
-        print("   • Check if CUDA/GPU is available")
-        print("   • Verify vit_pipeline.py arguments are correct")
+        for experiment, nsys_file in successful_runs:
+            file_size = nsys_file.stat().st_size / (1024*1024)  # MB
+            print(f"   📊 {experiment}: {nsys_file.name} ({file_size:.1f} MB)")
+    
+    if failed_runs:
+        print()
+        print(f"❌ Failed experiments: {len(failed_runs)}")
+        for experiment in failed_runs:
+            print(f"   ❌ {experiment}")
+    
+    print()
+    print("💡 Next steps:")
+    if successful_runs:
+        print("   • Open individual NSys reports in NVIDIA Nsight Systems GUI")
+        print("   • Compare experiments: nsys stats <report1> <report2>")
+        print(f"   • Reports organized in: nsys_reports/<experiment_name>/")
+    
+    if failed_runs:
+        print()
+        print("🔧 Troubleshooting failed experiments:")
+        print("   • Check GPU availability and CUDA installation")
+        print("   • Verify experiment configs exist in conf/experiment/")
         print("   • Ensure sufficient disk space for profiling data")
-        sys.exit(result.returncode)
+    
+    # Exit with error code if any experiments failed
+    if failed_runs:
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

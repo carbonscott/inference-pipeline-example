@@ -1,0 +1,12 @@
+# @package _global_
+# Medium ViT model with max-autotune compilation mode
+vit:
+  patch_size: 32
+  depth: 12
+  heads: 12
+  dim: 768
+  mlp_dim: 3072
+
+performance:
+  compile_model: true
+  compile_mode: "max-autotune"

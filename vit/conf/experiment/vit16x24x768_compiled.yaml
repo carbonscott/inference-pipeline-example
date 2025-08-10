@@ -1,0 +1,11 @@
+# @package _global_
+# Large ViT model (24 layers, 16px patches) with compilation enabled
+vit:
+  patch_size: 16
+  depth: 24
+  heads: 12
+  dim: 768
+  mlp_dim: 3072
+
+performance:
+  compile_model: true

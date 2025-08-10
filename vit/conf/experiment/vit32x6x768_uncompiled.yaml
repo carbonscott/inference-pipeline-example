@@ -1,0 +1,11 @@
+# @package _global_
+# Small ViT model (768 dim) without compilation (baseline)
+vit:
+  patch_size: 32
+  depth: 6
+  heads: 12
+  dim: 768
+  mlp_dim: 3072
+
+performance:
+  compile_model: false

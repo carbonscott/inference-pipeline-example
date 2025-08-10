@@ -1,0 +1,12 @@
+# @package _global_
+# Small ViT model with reduce-overhead compilation mode
+vit:
+  patch_size: 16
+  depth: 6
+  heads: 6
+  dim: 384
+  mlp_dim: 1536
+
+performance:
+  compile_model: true
+  compile_mode: "reduce-overhead"

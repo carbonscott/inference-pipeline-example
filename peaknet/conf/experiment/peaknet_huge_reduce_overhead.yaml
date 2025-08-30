@@ -1,0 +1,26 @@
+# @package _global_  
+# Huge PeakNet model (673M parameters) with reduce-overhead compilation for maximum performance
+# Based on peaknet-673m.yaml configuration
+
+# Update tensor shape for huge model's 1920x1920 input size
+shape: [1, 1920, 1920]  # Single channel, huge input size
+
+peaknet:
+  yaml_path: /sdf/data/lcls/ds/prj/prjcwang31/results/proj-peaknet/experiments/yaml/peaknet-673m.yaml
+  weights_path: null  # No pre-trained weights - use initialized model
+
+performance:
+  compile_model: true
+  compile_mode: reduce-overhead  # Maximum performance compilation
+  pin_memory: true  # Important for large tensors
+
+# Aggressive settings for maximum performance, but start conservative
+batch_size: 1  # Start with batch size 1 due to memory constraints
+num_samples: 100  # More samples to measure steady-state performance
+warmup_samples: 200  # Much more warmup needed for reduce-overhead mode
+
+# Test control - adjusted for performance measurement
+test:
+  sync_frequency: 10  # Less frequent updates once steady state is reached
+  skip_warmup: false
+  deterministic: false

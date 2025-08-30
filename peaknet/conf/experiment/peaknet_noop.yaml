@@ -1,0 +1,14 @@
+# @package _global_
+# No-op mode for testing pipeline overhead without model computation
+
+peaknet:
+  yaml_path: null  # No model - pure pipeline testing
+  weights_path: null
+
+performance:
+  compile_model: false
+
+# Can use larger batch size in no-op mode
+batch_size: 32
+num_samples: 2000
+warmup_samples: 100

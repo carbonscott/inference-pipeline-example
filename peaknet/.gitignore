@@ -1,0 +1,22 @@
+# Runtime outputs and logs
+outputs/
+
+# NSys profiling reports (large binary files)
+nsys_reports/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,15 @@
+# @package _global_  
+# Small PeakNet model with reduce-overhead compilation for maximum performance
+
+peaknet:
+  yaml_path: /sdf/data/lcls/ds/prj/prjcwang31/results/proj-peaknet/convnext_seg_config.yaml
+  weights_path: null  # No pre-trained weights - use initialized model
+
+performance:
+  compile_model: true
+  compile_mode: reduce-overhead
+
+# Use smaller batch size for small model but increase samples for better measurement
+batch_size: 8
+num_samples: 1000
+warmup_samples: 200  # More warmup for reduce-overhead mode

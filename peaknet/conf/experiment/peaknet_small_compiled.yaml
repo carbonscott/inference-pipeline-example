@@ -1,0 +1,15 @@
+# @package _global_
+# Small PeakNet model with compilation enabled
+
+peaknet:
+  yaml_path: /sdf/data/lcls/ds/prj/prjcwang31/results/proj-peaknet/convnext_seg_config.yaml
+  weights_path: null  # No pre-trained weights - use initialized model
+
+performance:
+  compile_model: true
+  compile_mode: default
+
+# Use smaller batch size for small model
+batch_size: 8
+num_samples: 500
+warmup_samples: 50

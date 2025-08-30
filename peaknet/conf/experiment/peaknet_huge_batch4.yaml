@@ -1,0 +1,27 @@
+# @package _global_
+# Huge PeakNet model (673M parameters) with batch size 4 - test GPU memory limits
+# Based on peaknet-673m.yaml configuration
+# WARNING: May cause OOM on GPUs with less than 40GB memory
+
+# Update tensor shape for huge model's 1920x1920 input size
+shape: [1, 1920, 1920]  # Single channel, huge input size
+
+peaknet:
+  yaml_path: /sdf/data/lcls/ds/prj/prjcwang31/results/proj-peaknet/experiments/yaml/peaknet-673m.yaml
+  weights_path: null  # No pre-trained weights - use initialized model
+
+performance:
+  compile_model: true
+  compile_mode: default  # Safe compilation mode for memory-intensive config
+  pin_memory: true  # Important for large tensors
+
+# Test larger batch size - may require high-memory GPU
+batch_size: 4  # WARNING: May cause OOM - monitor GPU memory usage
+num_samples: 40  # Adjust to be multiple of batch_size
+warmup_samples: 20  # Conservative warmup with larger batches
+
+# Test control - adjusted for batch processing
+test:
+  sync_frequency: 2  # More frequent updates with larger batches (every 2 batches = 8 samples)
+  skip_warmup: false
+  deterministic: false

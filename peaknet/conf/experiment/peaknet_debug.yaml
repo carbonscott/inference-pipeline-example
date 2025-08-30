@@ -1,0 +1,25 @@
+# @package _global_
+# Debug configuration for troubleshooting GPU execution issues
+# Small model with extensive device validation and logging
+
+# Use small model for faster debugging
+shape: [1, 512, 512]  # Single channel, small size for debugging
+
+peaknet:
+  yaml_path: /sdf/data/lcls/ds/prj/prjcwang31/results/proj-peaknet/convnext_seg_config.yaml
+  weights_path: null  # No pre-trained weights - use initialized model
+
+performance:
+  compile_model: false  # No compilation for cleaner debugging
+  pin_memory: true
+
+# Minimal test parameters for debugging
+batch_size: 1  # Single batch for easier debugging
+num_samples: 3  # Just a few samples to check GPU execution
+warmup_samples: 2  # Minimal warmup
+
+# Debug-friendly test control
+test:
+  sync_frequency: 1  # Progress update after every batch
+  skip_warmup: false
+  deterministic: false  # Allow some variation for debugging

@@ -1,0 +1,11 @@
+# @package _global_
+# Small ViT model (16px patches) without compilation (baseline)
+vit:
+  patch_size: 16
+  depth: 6
+  heads: 6
+  dim: 384
+  mlp_dim: 1536
+
+performance:
+  compile_model: false

@@ -1,0 +1,13 @@
+# @package _global_
+# Medium ViT model without compilation - batch size 1 (baseline latency)
+batch_size: 1
+
+vit:
+  patch_size: 32
+  depth: 12
+  heads: 12
+  dim: 768
+  mlp_dim: 3072
+
+performance:
+  compile_model: false

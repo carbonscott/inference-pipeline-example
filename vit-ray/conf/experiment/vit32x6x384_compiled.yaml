@@ -1,0 +1,11 @@
+# @package _global_
+# Small ViT model with compilation enabled
+vit:
+  patch_size: 32
+  depth: 6
+  heads: 6
+  dim: 384
+  mlp_dim: 1536
+
+performance:
+  compile_model: true

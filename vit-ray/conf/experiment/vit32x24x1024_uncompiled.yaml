@@ -1,0 +1,11 @@
+# @package _global_
+# Large ViT model (24 layers, 1024 dim) without compilation (baseline)
+vit:
+  patch_size: 32
+  depth: 24
+  heads: 16
+  dim: 1024
+  mlp_dim: 4096
+
+performance:
+  compile_model: false

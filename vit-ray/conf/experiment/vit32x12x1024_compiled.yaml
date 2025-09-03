@@ -1,0 +1,11 @@
+# @package _global_
+# Medium ViT model (1024 dim) with compilation enabled
+vit:
+  patch_size: 32
+  depth: 12
+  heads: 16
+  dim: 1024
+  mlp_dim: 4096
+
+performance:
+  compile_model: true

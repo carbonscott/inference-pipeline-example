@@ -85,14 +85,27 @@ def validate_args(args) -> None:
     # Note: NSys profiling files are automatically saved by Ray to $TMPDIR/ray/session_*/logs/nsight/
 
 
-def setup_gpu_environment(min_gpus: int, verbose: bool = False) -> List[int]:
+def setup_gpu_environment(min_gpus: int, skip_validation: bool = False, verbose: bool = False) -> List[int]:
     """
-    Set up GPU environment with health validation.
+    Set up GPU environment with optional health validation.
+
+    Args:
+        min_gpus: Minimum number of healthy GPUs required
+        skip_validation: Skip health validation for production clusters
+        verbose: Enable detailed output
 
     Returns:
         List of healthy GPU IDs that Ray will use
     """
+    if skip_validation:
+        print("\n⚡ Step 1: GPU Environment Setup (Production Mode)")
+        print(f"✅ Skipping validation - trusting Ray cluster provides {min_gpus}+ healthy GPUs")
+        # Return dummy list since we're trusting the cluster
+        return list(range(min_gpus))
+
     print("\n🔍 Step 1: GPU Health Validation")
+    if verbose:
+        print("   (Use --skip-gpu-validation for faster startup in production)")
 
     try:
         healthy_gpus = get_healthy_gpus_for_ray(min_gpus=min_gpus)
@@ -110,6 +123,7 @@ def setup_gpu_environment(min_gpus: int, verbose: bool = False) -> List[int]:
         print("   - Ensure CUDA is available: nvidia-smi")
         print("   - Check for GPU hardware issues")
         print("   - Try reducing --min-gpus or --max-actors")
+        print("   - Use --skip-gpu-validation for production clusters")
         sys.exit(1)
 
 
@@ -454,6 +468,9 @@ Examples:
 
   # Performance test requiring at least 3 GPUs
   python run_streaming_pipeline.py --min-gpus 3 --enable-profiling --batches-per-producer 10
+  
+  # Production mode with validation skipped for faster startup
+  python run_streaming_pipeline.py --skip-gpu-validation --total-samples 10000
         """
     )
 
@@ -478,6 +495,8 @@ Examples:
     # System parameters
     parser.add_argument('--min-gpus', type=int, default=1,
                        help='Minimum healthy GPUs required (default: 1)')
+    parser.add_argument('--skip-gpu-validation', action='store_true',
+                       help='Skip GPU health validation (faster startup for production clusters)')
 
     # Processing options
     parser.add_argument('--no-compute', action='store_true',
@@ -522,7 +541,7 @@ Examples:
 
     try:
         # Step 1: GPU Environment Setup
-        healthy_gpus = setup_gpu_environment(args.min_gpus, args.verbose)
+        healthy_gpus = setup_gpu_environment(args.min_gpus, args.skip_gpu_validation, args.verbose)
 
         # Step 2: Ray Cluster Setup  
         setup_ray_cluster(args)

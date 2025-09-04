@@ -172,12 +172,8 @@ class DoubleBufferedPipeline:
         # Check if model is None (no-op mode)
         self.is_noop = (self.model is None)
         
-        # CRITICAL: Explicit CUDA device management for pipeline
-        # Force device context establishment
+        # Ensure pipeline operations use the correct device
         torch.cuda.set_device(gpu_id)
-        
-        # Verify GPU memory allocation capability (silent verification)
-        initial_memory = torch.cuda.memory_allocated(gpu_id)
 
         # Create CUDA streams for pipeline stages
         self.h2d_stream = torch.cuda.Stream(device=gpu_id)

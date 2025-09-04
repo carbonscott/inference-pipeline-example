@@ -73,51 +73,21 @@ class VitPipelineActorBase:
             torch.backends.cudnn.benchmark = False
             torch.manual_seed(42)
         
-        # GPU assignment: Let Ray handle device assignment properly
+        # GPU assignment: Trust Ray's resource allocation
+        # Ray automatically manages GPU assignment via CUDA_VISIBLE_DEVICES
         if gpu_id is not None:
-            # Explicit GPU ID provided (for testing/debugging)
+            # Explicit GPU ID provided (for testing/debugging only)
             self.gpu_id = gpu_id
-            torch.cuda.set_device(self.gpu_id)
             logging.info(f"Using explicitly assigned GPU {self.gpu_id}")
         else:
-            # Let Ray's scheduler assign GPUs - Ray sets CUDA_VISIBLE_DEVICES per actor
-            cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-            
-            try:
-                # Try Ray's new runtime context first
-                runtime_context = ray.get_runtime_context()
-                assigned_gpus = runtime_context.get_accelerator_ids().get("GPU", [])
-                
-                if cuda_visible:
-                    # Ray manages CUDA_VISIBLE_DEVICES per actor - use device 0 in the visible space
-                    self.gpu_id = 0  # Always use first visible device in filtered space
-                    torch.cuda.set_device(self.gpu_id)
-                    visible_devices = cuda_visible.split(',')
-                    physical_gpu = visible_devices[0] if visible_devices else 'unknown'
-                    logging.info(f"Using GPU device 0 in Ray's filtered space (physical GPU {physical_gpu})")
-                elif assigned_gpus:
-                    # Fallback to runtime context if CUDA_VISIBLE_DEVICES not set
-                    try:
-                        self.gpu_id = int(assigned_gpus[0])
-                        torch.cuda.set_device(self.gpu_id)
-                        logging.info(f"Using Ray runtime assigned GPU: {self.gpu_id}")
-                    except ValueError:
-                        # If conversion fails, use device 0
-                        self.gpu_id = 0
-                        torch.cuda.set_device(self.gpu_id)
-                        logging.info(f"Using fallback GPU device 0 (runtime context parse failed)")  
-                else:
-                    # Fall back to legacy Ray method
-                    legacy_gpu_ids = ray.get_gpu_ids()
-                    if not legacy_gpu_ids:
-                        raise RuntimeError("No GPU assigned to this actor by Ray")
-                    self.gpu_id = int(legacy_gpu_ids[0])
-                    torch.cuda.set_device(self.gpu_id)
-                    logging.info(f"Using Ray legacy assigned GPU: {self.gpu_id}")
-                    
-            except Exception as e:
-                logging.error(f"Failed to get Ray GPU assignment: {e}")
-                raise RuntimeError(f"GPU assignment failed: {e}")
+            # Ray-native approach: assigned GPU always appears as cuda:0
+            self.gpu_id = 0
+            cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')
+            if cuda_visible != 'not set':
+                physical_gpu = cuda_visible.split(',')[0]
+                logging.info(f"Using Ray-assigned GPU device 0 (physical GPU {physical_gpu})")
+            else:
+                logging.warning("CUDA_VISIBLE_DEVICES not set by Ray - using device 0")
         
         logging.info(f"✅ Actor GPU assignment complete - using CUDA device {self.gpu_id}")
         
@@ -125,28 +95,17 @@ class VitPipelineActorBase:
         cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')
         logging.info(f"CUDA_VISIBLE_DEVICES: {cuda_visible}")
         
-        # CRITICAL: Force CUDA context initialization and verify GPU is working
+        # CUDA context establishment: Minimal warmup to ensure GPU is accessible
         try:
-            # Explicitly initialize CUDA and verify context
-            torch.cuda.init()
-            
-            # Create and use tensors to force GPU context establishment
+            # Simple GPU context establishment
             with torch.cuda.device(self.gpu_id):
-                # Create test tensors on GPU for warmup
-                test_a = torch.randn(256, 256, device=f'cuda:{self.gpu_id}')
-                test_b = torch.randn(256, 256, device=f'cuda:{self.gpu_id}')
-                
-                # Perform GPU computation to establish context
-                for i in range(5):
-                    test_c = torch.matmul(test_a, test_b)
-                
-                # Force synchronization to ensure GPU work completes
+                # Create small tensor to initialize CUDA context
+                warmup_tensor = torch.ones(2, 2, device=f'cuda:{self.gpu_id}')
+                _ = warmup_tensor + warmup_tensor  # Simple operation
                 torch.cuda.synchronize(self.gpu_id)
-                
-                # Cleanup test tensors
-                del test_a, test_b, test_c
+                del warmup_tensor
             
-            logging.info(f"✅ CUDA context established - current device: {torch.cuda.current_device()}")
+            logging.info(f"✅ CUDA context established on device {self.gpu_id}")
             
         except Exception as e:
             logging.error(f"❌ CUDA context initialization failed: {e}")

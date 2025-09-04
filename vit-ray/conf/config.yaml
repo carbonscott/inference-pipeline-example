@@ -2,6 +2,7 @@
 defaults:
   - _self_
   - experiment: null
+  - ray: null
 
 # Core pipeline parameters
 gpu_id: 0

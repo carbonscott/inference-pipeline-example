@@ -1,0 +1,16 @@
+# Ray Pipeline Configuration for Multi-GPU
+init:
+  # Ray cluster initialization settings
+  local_mode: false
+  ignore_reinit_error: true
+
+actors:
+  # GPU actor configuration
+  num_gpus: 2
+  profiling_enabled: false
+
+producers:
+  # Data producer configuration
+  num_tasks: 4
+  batches_per_task: 10
+  inter_batch_delay: 0.0

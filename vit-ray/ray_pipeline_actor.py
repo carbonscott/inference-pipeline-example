@@ -232,9 +232,8 @@ class VitPipelineActorBase:
                     nvtx_prefix=f"ray_actor_{self.gpu_id}"
                 )
             
-            # Wait for pipeline completion to get accurate timing
-            with nvtx.range(f"pipeline_sync_{batch_id}"):
-                self.pipeline.wait_for_completion()
+            # Note: Removed pipeline sync to allow overlap between batches
+            # Pipeline completion will be handled at batch list level
             
             end_time = time.time()
             batch_time = end_time - start_time
@@ -274,10 +273,10 @@ class VitPipelineActorBase:
                 result = self.process_batch_from_refs(batch_refs, batch_idx)
                 results.append(result)
             
-            # Final synchronization
+            # Final synchronization - only at the very end to allow pipeline overlap
             with nvtx.range("final_pipeline_sync"):
                 self.pipeline.wait_for_completion()
-                torch.cuda.synchronize(device=self.gpu_id)
+                # Note: Removed explicit GPU sync to let Ray handle synchronization
             
             logging.info(f"Actor {self.gpu_id}: Completed {len(batch_list)} batches")
             return results

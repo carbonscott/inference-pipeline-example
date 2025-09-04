@@ -1,0 +1,16 @@
+# Ray Pipeline Configuration for CPU Testing
+init:
+  # Ray cluster initialization settings
+  local_mode: false
+  ignore_reinit_error: true
+
+actors:
+  # CPU actor configuration for testing pipeline logic
+  num_gpus: 0
+  profiling_enabled: false
+
+producers:
+  # Data producer configuration
+  num_tasks: 2
+  batches_per_task: 5
+  inter_batch_delay: 0.0

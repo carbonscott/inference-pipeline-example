@@ -16,10 +16,10 @@ system:
 
 # Data parameters  
 data:
-  tensor_channels: 3
-  tensor_size: 224  # Height and width
-  tensor_height: null  # Override height (default: same as tensor_size)
-  tensor_width: null   # Override width (default: same as tensor_size)
+  input_channels: 3
+  input_size: 224  # Height and width
+  input_height: null  # Override height (default: same as input_size)
+  input_width: null   # Override width (default: same as input_size)
 
 # Processing options
 processing:

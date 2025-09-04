@@ -16,7 +16,7 @@ streaming:
     verify_actors: true
     
   data:
-    tensor_size: 224  # Standard ImageNet size
+    input_size: 224  # Standard ImageNet size
 
 # Performance optimizations
 performance:

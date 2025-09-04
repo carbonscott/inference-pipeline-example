@@ -1,0 +1,42 @@
+# @package _global_
+# Test configuration for single-channel 512x512 images with 16px patches
+defaults:
+  - override /model: vit_base  # Use ViT-Base but with modifications
+
+# Override for single-channel input and 16px patches
+vit:
+  patch_size: 16              # Keep 16px patches as requested
+  channels: 1                 # Single channel (grayscale)
+  # Keep other ViT-Base parameters: depth=12, heads=12, dim=768, mlp_dim=3072
+
+# High-resolution tensor shape
+shape: [1, 512, 512]          # Single channel, 512x512 spatial
+
+# Streaming configuration optimized for large images
+streaming:
+  runtime:
+    batch_size: 4             # Smaller batches due to large image size
+    num_producers: 4          # Moderate number of producers
+    batches_per_producer: 10  # 40 total batches for testing
+    total_samples: null       # Use calculated total: 4*4*10 = 160 samples
+    inter_batch_delay: 0.05   # Moderate streaming rate
+    
+  data:
+    input_channels: 1        # Match vit.channels
+    input_size: 512          # 512x512 images
+    input_height: null       # Use default (input_size)
+    input_width: null        # Use default (input_size)
+    
+  system:
+    min_gpus: 1               # Single GPU is fine for testing
+    verify_actors: true       # Verify GPU health
+    
+  output:
+    verbose: true             # Enable detailed output for testing
+    quiet: false
+
+# Performance settings for high-resolution images
+performance:
+  compile_model: false        # Avoid compilation issues during testing
+  pin_memory: true           # Enable for better performance
+  compile_mode: default      # Default compilation mode

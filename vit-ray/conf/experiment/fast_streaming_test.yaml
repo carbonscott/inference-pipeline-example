@@ -12,7 +12,7 @@ streaming:
     total_samples: 80  # Small total for quick testing
     
   data:
-    tensor_size: 128  # Smaller images for speed
+    input_size: 128  # Smaller images for speed
     
   system:
     min_gpus: 1  # Only need one GPU

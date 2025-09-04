@@ -35,7 +35,7 @@ class VitPipelineActorBase:
     
     def __init__(
         self,
-        tensor_shape: Tuple[int, int, int] = (3, 224, 224),
+        input_shape: Tuple[int, int, int] = (3, 224, 224),
         batch_size: int = 10,
         patch_size: int = 32,
         depth: int = 6,
@@ -55,7 +55,7 @@ class VitPipelineActorBase:
         Initialize the pipeline actor.
         
         Args:
-            tensor_shape: Input tensor shape (C, H, W)
+            input_shape: Input tensor shape (C, H, W)
             batch_size: Batch size for processing
             patch_size: ViT patch size
             depth: ViT depth (0 for no-op mode)
@@ -115,7 +115,7 @@ class VitPipelineActorBase:
             raise RuntimeError(f"CUDA context failed: {e}")
         
         # Store configuration
-        self.tensor_shape = tensor_shape
+        self.input_shape = input_shape
         self.batch_size = batch_size
         self.patch_size = patch_size
         self.depth = depth
@@ -131,7 +131,7 @@ class VitPipelineActorBase:
         
         # Create VIT model
         self.vit_model, self.image_size = create_vit_model(
-            tensor_shape=tensor_shape,
+            input_shape=input_shape,
             patch_size=patch_size,
             depth=depth,
             heads=heads,
@@ -146,10 +146,9 @@ class VitPipelineActorBase:
         )
         
         # Calculate shapes for pipeline
-        self.input_shape = tensor_shape
         if self.vit_model is None:
             # No-op mode: output shape same as input shape
-            self.output_shape = tensor_shape
+            self.output_shape = input_shape
         else:
             # ViT mode: output shape is transformer output (num_patches + 1, dim)
             num_patches = (self.image_size // patch_size) ** 2
@@ -184,7 +183,7 @@ class VitPipelineActorBase:
         }
         
         logging.info(f"✅ VitPipelineActor initialized successfully on GPU {self.gpu_id}")
-        logging.info(f"Model: depth={depth}, input_shape={self.input_shape}, output_shape={self.output_shape}")
+        logging.info(f"Model: depth={depth}, input_shape={input_shape}, output_shape={self.output_shape}")
     
     def get_actor_info(self) -> Dict[str, Any]:
         """Return actor information and current statistics."""

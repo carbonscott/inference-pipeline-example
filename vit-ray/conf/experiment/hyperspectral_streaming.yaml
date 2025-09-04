@@ -18,8 +18,8 @@ streaming:
     batches_per_producer: 16
     
   data:
-    tensor_channels: 8
-    tensor_size: 224
+    input_channels: 8
+    input_size: 224
 
 # Conservative performance settings for unusual data
 performance:

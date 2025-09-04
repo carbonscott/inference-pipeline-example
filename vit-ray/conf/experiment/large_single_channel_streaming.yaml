@@ -18,8 +18,8 @@ streaming:
     batches_per_producer: 32  # More batches per producer
     
   data:
-    tensor_channels: 1
-    tensor_size: 512
+    input_channels: 1
+    input_size: 512
 
 # Performance optimizations for large images
 performance:

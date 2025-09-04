@@ -89,17 +89,17 @@ def validate_config(cfg: DictConfig) -> None:
     if runtime.batch_size <= 0:
         raise ValueError("batch_size must be positive")
 
-    if data.tensor_size <= 0:
-        raise ValueError("tensor_size must be positive")
+    if data.input_size <= 0:
+        raise ValueError("input_size must be positive")
 
-    if data.tensor_channels <= 0:
-        raise ValueError("tensor_channels must be positive")
+    if data.input_channels <= 0:
+        raise ValueError("input_channels must be positive")
 
-    if data.tensor_height is not None and data.tensor_height <= 0:
-        raise ValueError("tensor_height must be positive")
+    if data.input_height is not None and data.input_height <= 0:
+        raise ValueError("input_height must be positive")
 
-    if data.tensor_width is not None and data.tensor_width <= 0:
-        raise ValueError("tensor_width must be positive")
+    if data.input_width is not None and data.input_width <= 0:
+        raise ValueError("input_width must be positive")
 
     if runtime.inter_batch_delay < 0:
         raise ValueError("inter_batch_delay cannot be negative")
@@ -211,11 +211,11 @@ def create_gpu_actors(cfg: DictConfig, healthy_gpus: List[int]) -> List[Any]:
     if enable_profiling and cfg.streaming.output.verbose:
         print("   📊 NSys profiling enabled - profile files will be generated per actor")
 
-    # Calculate tensor shape based on config
+    # Calculate input shape based on config
     data = cfg.streaming.data
-    height = data.tensor_height if data.tensor_height is not None else data.tensor_size
-    width = data.tensor_width if data.tensor_width is not None else data.tensor_size
-    tensor_shape = (data.tensor_channels, height, width)
+    height = data.input_height if data.input_height is not None else data.input_size
+    width = data.input_width if data.input_width is not None else data.input_size
+    input_shape = (data.input_channels, height, width)
 
     try:
         actors = create_pipeline_actors(
@@ -223,7 +223,7 @@ def create_gpu_actors(cfg: DictConfig, healthy_gpus: List[int]) -> List[Any]:
             enable_profiling=enable_profiling,
             validate_gpus=False,  # Already validated at system level
             # Pipeline configuration
-            tensor_shape=tensor_shape,
+            input_shape=input_shape,
             batch_size=cfg.streaming.runtime.batch_size,
             # Model configuration from Hydra config
             patch_size=cfg.vit.patch_size,
@@ -295,11 +295,11 @@ def generate_streaming_data(cfg: DictConfig) -> List[Any]:
     print(f"   Total batches: {runtime.num_producers * batches_per_producer}")
     print(f"   Batch size: {runtime.batch_size} samples")
     print(f"   Total samples: {runtime.num_producers * batches_per_producer * runtime.batch_size}")
-    # Calculate tensor shape based on config
-    height = data.tensor_height if data.tensor_height is not None else data.tensor_size
-    width = data.tensor_width if data.tensor_width is not None else data.tensor_size
-    tensor_shape = (data.tensor_channels, height, width)
-    print(f"   Tensor shape: {tensor_shape}")
+    # Calculate input shape based on config
+    height = data.input_height if data.input_height is not None else data.input_size
+    width = data.input_width if data.input_width is not None else data.input_size
+    input_shape = (data.input_channels, height, width)
+    print(f"   Input shape: {input_shape}")
 
     manager = RayDataProducerManager()
 
@@ -310,7 +310,7 @@ def generate_streaming_data(cfg: DictConfig) -> List[Any]:
             num_producers=runtime.num_producers,
             batches_per_producer=batches_per_producer,
             batch_size=runtime.batch_size,
-            tensor_shape=tensor_shape,
+            tensor_shape=input_shape,
             inter_batch_delay=runtime.inter_batch_delay,
             deterministic=False  # Random data for realistic streaming
         )
@@ -456,7 +456,7 @@ def print_results(performance: Dict[str, Any], cfg: DictConfig) -> None:
         print(f"   Min GPUs required: {cfg.streaming.system.min_gpus}")
         print(f"   Producers: {runtime.num_producers}")
         print(f"   Batch size: {runtime.batch_size}")
-        print(f"   Tensor size: {data.tensor_size}x{data.tensor_size}")
+        print(f"   Input size: {data.input_size}x{data.input_size}")
         print(f"   Inter-batch delay: {runtime.inter_batch_delay}s")
         print(f"   Profiling: {'enabled' if cfg.streaming.profiling.enable_profiling else 'disabled'}")
 
@@ -523,7 +523,7 @@ def run_streaming_pipeline_main(cfg: DictConfig) -> None:
         if cfg.streaming.output.verbose:
             print(f"Configuration summary:")
             print(f"  Model: {cfg.vit.patch_size}px patches, {cfg.vit.depth} layers, {cfg.vit.dim} dim")
-            print(f"  Data: {cfg.streaming.data.tensor_channels} channels, {cfg.streaming.data.tensor_size}px")
+            print(f"  Data: {cfg.streaming.data.input_channels} channels, {cfg.streaming.data.input_size}px")
             print(f"  Runtime: {cfg.streaming.runtime.batch_size} batch, {cfg.streaming.runtime.num_producers} producers")
 
     try:

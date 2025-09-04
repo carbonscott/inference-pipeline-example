@@ -1,0 +1,23 @@
+gpu_id: 0
+shape:
+- 3
+- 224
+- 224
+num_samples: 100
+batch_size: 4
+warmup_samples: 100
+vit:
+  patch_size: 32
+  depth: 6
+  heads: 8
+  dim: 512
+  mlp_dim: 2048
+test:
+  sync_frequency: 10
+  skip_warmup: false
+  deterministic: false
+performance:
+  pin_memory: true
+  compile_model: false
+  compile_mode: default
+nsys_report: null

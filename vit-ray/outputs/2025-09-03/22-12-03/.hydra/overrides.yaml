@@ -1,0 +1,4 @@
+- gpu_id=0
+- num_samples=100
+- batch_size=4
+- vit.depth=6

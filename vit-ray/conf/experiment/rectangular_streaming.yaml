@@ -14,9 +14,9 @@ streaming:
     batches_per_producer: 20
     
   data:
-    tensor_channels: 3
-    tensor_height: 144
-    tensor_width: 256
+    input_channels: 3
+    input_height: 144
+    input_width: 256
 
 # Standard performance settings
 performance:

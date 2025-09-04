@@ -1,0 +1,48 @@
+[2025-09-03 23:06:40,036][root][INFO] - Starting Ray VIT Pipeline with configuration:
+[2025-09-03 23:06:40,037][root][INFO] - gpu_id: 0
+shape:
+- 3
+- 224
+- 224
+num_samples: 1000
+batch_size: 10
+warmup_samples: 100
+vit:
+  patch_size: 32
+  depth: 6
+  heads: 8
+  dim: 512
+  mlp_dim: 2048
+test:
+  sync_frequency: 10
+  skip_warmup: false
+  deterministic: false
+performance:
+  pin_memory: true
+  compile_model: false
+  compile_mode: default
+nsys_report: null
+ray:
+  init:
+    local_mode: false
+    ignore_reinit_error: true
+  actors:
+    num_gpus: 1
+    profiling_enabled: true
+  producers:
+    num_tasks: 2
+    batches_per_task: 10
+    inter_batch_delay: 0.0
+
+[2025-09-03 23:06:40,038][root][INFO] - === Starting Ray VIT Pipeline Test ===
+[2025-09-03 23:06:40,038][root][INFO] - Configuration:
+[2025-09-03 23:06:40,038][root][INFO] -   GPUs: 1
+[2025-09-03 23:06:40,038][root][INFO] -   Profiling: enabled
+[2025-09-03 23:06:40,038][root][INFO] -   Data producers: 2
+[2025-09-03 23:06:40,038][root][INFO] -   Batches per producer: 10
+[2025-09-03 23:06:40,038][root][INFO] -   Total batches: 20
+[2025-09-03 23:06:40,038][root][INFO] - === Pre-Ray GPU Health Validation ===
+[2025-09-03 23:06:40,038][root][INFO] - === Starting System-Wide GPU Health Validation ===
+[2025-09-03 23:06:40,058][root][ERROR] - ❌ GPU validation failed: GPU validation failed: CUDA not available on this system
+[2025-09-03 23:06:40,058][root][ERROR] - Ray pipeline test failed: Cannot start Ray: GPU validation failed: CUDA not available on this system
+[2025-09-03 23:06:40,058][root][ERROR] - ❌ Ray pipeline test failed: Cannot start Ray: GPU validation failed: CUDA not available on this system

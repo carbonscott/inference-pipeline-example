@@ -108,16 +108,16 @@ def get_gpu_info(gpu_id):
     except Exception as e:
         return {'error': str(e)}
 
-def create_vit_model(tensor_shape, patch_size, depth, heads, dim, mlp_dim, gpu_id, channels=None, dropout=0.0, emb_dropout=0.0, compile_model=False, compile_mode='default'):
+def create_vit_model(input_shape, patch_size, depth, heads, dim, mlp_dim, gpu_id, channels=None, dropout=0.0, emb_dropout=0.0, compile_model=False, compile_mode='default'):
     """Create ViT model for compute simulation, or None for no-op"""
-    C, H, W = tensor_shape
+    C, H, W = input_shape
 
-    # Use explicit channels parameter if provided, otherwise extract from tensor_shape
+    # Use explicit channels parameter if provided, otherwise extract from input_shape
     if channels is not None:
         model_channels = channels
-        # Validate that channels matches tensor_shape if both are specified
+        # Validate that channels matches input_shape if both are specified
         if C != channels:
-            print(f"Warning: tensor_shape channels ({C}) != vit.channels ({channels}). Using vit.channels ({channels})")
+            print(f"Warning: input_shape channels ({C}) != vit.channels ({channels}). Using vit.channels ({channels})")
     else:
         model_channels = C
 
@@ -413,7 +413,7 @@ def run_pipeline_test(
 
     # Create ViT model separately
     vit_model, image_size = create_vit_model(
-        tensor_shape=tensor_shape, 
+        input_shape=tensor_shape, 
         patch_size=patch_size, 
         depth=depth, 
         heads=heads, 

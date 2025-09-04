@@ -1,0 +1,28 @@
+# @package _global_
+# Optimized for large single-channel images (e.g., 512x512 grayscale)
+defaults:
+  - override /model: vit_base_patch32
+
+# Single channel configuration
+vit:
+  channels: 1
+  
+# Large image tensor shape  
+shape: [1, 512, 512]
+
+# Streaming-specific overrides
+streaming:
+  runtime:
+    batch_size: 4  # Smaller batches for large images
+    num_producers: 8  # More producers for high throughput
+    batches_per_producer: 32  # More batches per producer
+    
+  data:
+    tensor_channels: 1
+    tensor_size: 512
+
+# Performance optimizations for large images
+performance:
+  compile_model: true
+  compile_mode: default
+  pin_memory: true

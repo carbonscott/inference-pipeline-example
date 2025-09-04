@@ -1,0 +1,10 @@
+# @package _global_
+# Non-square rectangular image processing example
+defaults:
+  - override /model: vit_base_patch32  # Use larger patches for rectangular images
+
+# Rectangular tensor shape (16:9 aspect ratio, downscaled)
+shape: [3, 144, 256]  # 3 channels, height=144, width=256
+
+performance:
+  compile_model: false

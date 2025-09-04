@@ -1,0 +1,24 @@
+# @package _global_
+# Non-square rectangular image streaming (e.g., video frames, wide images)
+defaults:
+  - override /model: vit_base_patch32  # Larger patches work better for rectangular images
+
+# Rectangular tensor shape (16:9 aspect ratio)
+shape: [3, 144, 256]
+
+# Streaming configuration for rectangular data
+streaming:
+  runtime:
+    batch_size: 8
+    num_producers: 6
+    batches_per_producer: 20
+    
+  data:
+    tensor_channels: 3
+    tensor_height: 144
+    tensor_width: 256
+
+# Standard performance settings
+performance:
+  compile_model: false  # Avoid issues with non-square images
+  pin_memory: true

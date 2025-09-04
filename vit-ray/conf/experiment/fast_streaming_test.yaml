@@ -1,0 +1,26 @@
+# @package _global_
+# Quick testing configuration with small model and small data
+defaults:
+  - override /model: vit_tiny
+
+# Small test configuration
+streaming:
+  runtime:
+    batch_size: 8
+    num_producers: 2
+    batches_per_producer: 5
+    total_samples: 80  # Small total for quick testing
+    
+  data:
+    tensor_size: 128  # Smaller images for speed
+    
+  system:
+    min_gpus: 1  # Only need one GPU
+    
+# Small image tensor shape
+shape: [3, 128, 128]
+
+# No compilation for fastest startup
+performance:
+  compile_model: false
+  pin_memory: true

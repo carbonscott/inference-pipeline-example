@@ -1,0 +1,13 @@
+# @package _global_
+# ViT-Large model with aggressive optimization
+defaults:
+  - override /model: vit_large
+
+performance:
+  compile_model: true
+  compile_mode: max-autotune
+
+# Larger configuration for high-performance testing
+num_samples: 2000
+batch_size: 4  # Smaller batches for large model
+warmup_samples: 500  # More warmup for aggressive compilation

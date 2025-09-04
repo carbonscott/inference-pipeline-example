@@ -1,0 +1,15 @@
+# @package _global_
+# ViT-Tiny model configuration
+# Optimized for fast inference with minimal memory usage
+vit:
+  patch_size: 16
+  depth: 12
+  heads: 3
+  dim: 192
+  mlp_dim: 768  # 4x dim
+  channels: 3  # RGB input by default
+  dropout: 0.0
+  emb_dropout: 0.0
+
+# Expected parameter count: ~5.7M
+# Typical use cases: Quick prototyping, resource-constrained environments

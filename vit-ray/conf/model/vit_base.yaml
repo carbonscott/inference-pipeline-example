@@ -1,0 +1,15 @@
+# @package _global_
+# ViT-Base model configuration
+# Standard Vision Transformer baseline (similar to ViT-B/16)
+vit:
+  patch_size: 16
+  depth: 12
+  heads: 12
+  dim: 768
+  mlp_dim: 3072  # 4x dim
+  channels: 3  # RGB input by default
+  dropout: 0.0
+  emb_dropout: 0.0
+
+# Expected parameter count: ~86M
+# Typical use cases: Standard ImageNet-scale tasks, research baselines

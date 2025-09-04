@@ -1,0 +1,25 @@
+# Streaming Pipeline Configuration
+defaults:
+  - _self_
+  - model: vit_small  # Default model
+  - streaming: default
+  - experiment: null
+
+# Core pipeline parameters (inherited from main config)
+gpu_id: 0  # Not used in streaming (Ray manages GPUs)
+shape: [3, 224, 224]  # Tensor shape as [C, H, W] - should match model channels
+num_samples: 1000  # Not used in streaming (use streaming.runtime.total_samples)
+batch_size: 10  # Default batch size (can be overridden by streaming config)
+warmup_samples: 100  # Not used in streaming
+
+# Test control (not used in streaming)
+test:
+  sync_frequency: 10
+  skip_warmup: false
+  deterministic: false
+
+# Performance and memory settings
+performance:
+  pin_memory: true
+  compile_model: false
+  compile_mode: default  # Options: default, reduce-overhead, max-autotune

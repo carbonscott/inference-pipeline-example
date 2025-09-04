@@ -1,0 +1,17 @@
+# @package _global_
+# Hyperspectral image processing with many channels
+defaults:
+  - override /model: vit_small
+
+# Override channels for hyperspectral data (e.g., satellite imagery)
+vit:
+  channels: 8  # 8-band hyperspectral
+
+# Corresponding tensor shape
+shape: [8, 224, 224]
+
+# Use more warmup for unusual channel count
+warmup_samples: 200
+
+performance:
+  compile_model: false

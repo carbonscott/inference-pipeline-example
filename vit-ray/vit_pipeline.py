@@ -108,9 +108,18 @@ def get_gpu_info(gpu_id):
     except Exception as e:
         return {'error': str(e)}
 
-def create_vit_model(tensor_shape, patch_size, depth, heads, dim, mlp_dim, gpu_id, compile_model=False, compile_mode='default'):
+def create_vit_model(tensor_shape, patch_size, depth, heads, dim, mlp_dim, gpu_id, channels=None, dropout=0.0, emb_dropout=0.0, compile_model=False, compile_mode='default'):
     """Create ViT model for compute simulation, or None for no-op"""
     C, H, W = tensor_shape
+
+    # Use explicit channels parameter if provided, otherwise extract from tensor_shape
+    if channels is not None:
+        model_channels = channels
+        # Validate that channels matches tensor_shape if both are specified
+        if C != channels:
+            print(f"Warning: tensor_shape channels ({C}) != vit.channels ({channels}). Using vit.channels ({channels})")
+    else:
+        model_channels = C
 
     # Ensure image size is compatible with patch size
     image_size = max(H, W)
@@ -131,9 +140,9 @@ def create_vit_model(tensor_shape, patch_size, depth, heads, dim, mlp_dim, gpu_i
         depth=depth,
         heads=heads,
         mlp_dim=mlp_dim,
-        channels=C,
-        dropout=0.0,  # No dropout for consistent timing
-        emb_dropout=0.0
+        channels=model_channels,
+        dropout=dropout,
+        emb_dropout=emb_dropout
     ).to(f'cuda:{gpu_id}')
 
     # Set to eval mode for consistent inference timing
@@ -319,6 +328,9 @@ def run_pipeline_test(
     heads=8,
     dim=512,
     mlp_dim=2048,
+    channels=None,
+    dropout=0.0,
+    emb_dropout=0.0,
     skip_warmup=False,
     deterministic=False,
     pin_memory=True,
@@ -401,7 +413,18 @@ def run_pipeline_test(
 
     # Create ViT model separately
     vit_model, image_size = create_vit_model(
-        tensor_shape, patch_size, depth, heads, dim, mlp_dim, gpu_id, compile_model, compile_mode
+        tensor_shape=tensor_shape, 
+        patch_size=patch_size, 
+        depth=depth, 
+        heads=heads, 
+        dim=dim, 
+        mlp_dim=mlp_dim, 
+        gpu_id=gpu_id, 
+        channels=channels,
+        dropout=dropout,
+        emb_dropout=emb_dropout,
+        compile_model=compile_model, 
+        compile_mode=compile_mode
     )
 
     # Calculate input and output shapes
@@ -504,6 +527,9 @@ def main(cfg: DictConfig) -> None:
         heads=cfg.vit.heads,
         dim=cfg.vit.dim,
         mlp_dim=cfg.vit.mlp_dim,
+        channels=cfg.vit.get('channels', None),
+        dropout=cfg.vit.get('dropout', 0.0),
+        emb_dropout=cfg.vit.get('emb_dropout', 0.0),
         skip_warmup=cfg.test.skip_warmup,
         deterministic=cfg.test.deterministic,
         pin_memory=cfg.performance.pin_memory,

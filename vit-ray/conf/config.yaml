@@ -1,23 +1,21 @@
 # ViT Pipeline Configuration
 defaults:
   - _self_
+  - model: vit_small  # Default to ViT-Small model
   - experiment: null
   - ray: null
 
 # Core pipeline parameters
 gpu_id: 0
-shape: [3, 224, 224]  # Tensor shape as [C, H, W]
+shape: [3, 224, 224]  # Tensor shape as [C, H, W] - should match vit.channels
 num_samples: 1000
 batch_size: 10
 warmup_samples: 100
 
-# ViT model configuration
-vit:
-  patch_size: 32
-  depth: 6  # Set to 0 for no-op mode
-  heads: 8
-  dim: 512
-  mlp_dim: 2048
+# ViT model configuration is now loaded from model templates
+# Override specific parameters here if needed
+# vit:
+#   depth: 0  # Set to 0 for no-op mode
 
 # Test control
 test:

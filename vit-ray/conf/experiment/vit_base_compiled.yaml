@@ -1,0 +1,8 @@
+# @package _global_
+# ViT-Base model with compilation enabled
+defaults:
+  - override /model: vit_base
+
+performance:
+  compile_model: true
+  compile_mode: default

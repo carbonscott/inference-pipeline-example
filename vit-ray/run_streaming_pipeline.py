@@ -14,17 +14,23 @@ Features:
 - Fail-fast error handling (no CPU fallback)
 
 Example Usage:
+
+    ## Hydra Configuration Style (Recommended):
+    # Use predefined experiment configurations
+    python run_streaming_pipeline.py experiment=fast_streaming_test --max-actors 2
+    python run_streaming_pipeline.py experiment=large_single_channel_streaming --total-samples 512000 --enable-profiling
+    python run_streaming_pipeline.py experiment=production_streaming --max-actors 4
+    
+    # Mix model templates with runtime overrides
+    python run_streaming_pipeline.py model=vit_base_patch32 vit.channels=1 shape=[1,512,512] --max-actors 4 --total-samples 512000
+    python run_streaming_pipeline.py model=vit_tiny streaming.runtime.batch_size=16 --enable-profiling
+    
+    ## Traditional CLI Style (Legacy):
     # Auto-discover and use all healthy GPUs with 4 data producers, small tensors
     python run_streaming_pipeline.py --num-producers 4 --tensor-size 64
-
+    
     # Limit to 2 actors max with custom configuration
     python run_streaming_pipeline.py --max-actors 2 --batch-size 8 --batches-per-producer 10 --verbose
-
-    # Generate lots of data for throughput testing  
-    python run_streaming_pipeline.py --num-producers 8 --batches-per-producer 25 --inter-batch-delay 0.05
-
-    # Enable NSys profiling for performance analysis (auto-scale GPUs)
-    python run_streaming_pipeline.py --enable-profiling
 """
 
 import argparse
@@ -34,6 +40,10 @@ import time
 import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+
+# Hydra imports
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
 # Import our pipeline components
 from gpu_health_validator import get_healthy_gpus_for_ray
@@ -78,6 +88,15 @@ def validate_args(args) -> None:
 
     if args.tensor_size <= 0:
         raise ValueError("--tensor-size must be positive")
+
+    if args.tensor_channels <= 0:
+        raise ValueError("--tensor-channels must be positive")
+
+    if args.tensor_height is not None and args.tensor_height <= 0:
+        raise ValueError("--tensor-height must be positive")
+
+    if args.tensor_width is not None and args.tensor_width <= 0:
+        raise ValueError("--tensor-width must be positive")
 
     if args.inter_batch_delay < 0:
         raise ValueError("--inter-batch-delay cannot be negative")
@@ -187,7 +206,10 @@ def create_gpu_actors(args, healthy_gpus: List[int]) -> List[Any]:
         if args.profiling_output_dir:
             print(f"   📁 Profiling output directory: {args.profiling_output_dir}")
 
-    tensor_shape = (3, args.tensor_size, args.tensor_size)
+    # Calculate tensor shape based on arguments
+    height = args.tensor_height if args.tensor_height is not None else args.tensor_size
+    width = args.tensor_width if args.tensor_width is not None else args.tensor_size
+    tensor_shape = (args.tensor_channels, height, width)
 
     try:
         actors = create_pipeline_actors(
@@ -197,13 +219,19 @@ def create_gpu_actors(args, healthy_gpus: List[int]) -> List[Any]:
             # Pipeline configuration
             tensor_shape=tensor_shape,
             batch_size=args.batch_size,
-            patch_size=16,
-            depth=0 if args.no_compute else 6,  # No-op vs meaningful GPU compute
-            heads=8,
-            dim=384,
-            mlp_dim=1536,
+            # Use config values if available (Hydra), otherwise hardcoded defaults (argparse)
+            patch_size=getattr(args, 'vit_patch_size', 16),
+            depth=getattr(args, 'vit_depth', 0 if args.no_compute else 6),
+            heads=getattr(args, 'vit_heads', 8),
+            dim=getattr(args, 'vit_dim', 384),
+            mlp_dim=getattr(args, 'vit_mlp_dim', 1536),
+            channels=getattr(args, 'vit_channels', args.tensor_channels),
+            dropout=getattr(args, 'vit_dropout', 0.0),
+            emb_dropout=getattr(args, 'vit_emb_dropout', 0.0),
+            compile_model=getattr(args, 'compile_model', False),
+            compile_mode=getattr(args, 'compile_mode', 'default'),
             deterministic=True,
-            pin_memory=not args.no_pin_memory
+            pin_memory=getattr(args, 'pin_memory', not args.no_pin_memory)
         )
 
         print(f"✅ Successfully created {len(actors)} GPU actors")
@@ -257,10 +285,13 @@ def generate_streaming_data(args) -> List[Any]:
     print(f"   Total batches: {args.num_producers * batches_per_producer}")
     print(f"   Batch size: {args.batch_size} samples")
     print(f"   Total samples: {args.num_producers * batches_per_producer * args.batch_size}")
-    print(f"   Tensor shape: (3, {args.tensor_size}, {args.tensor_size})")
+    # Calculate tensor shape based on arguments
+    height = args.tensor_height if args.tensor_height is not None else args.tensor_size
+    width = args.tensor_width if args.tensor_width is not None else args.tensor_size
+    tensor_shape = (args.tensor_channels, height, width)
+    print(f"   Tensor shape: {tensor_shape}")
 
     manager = RayDataProducerManager()
-    tensor_shape = (3, args.tensor_size, args.tensor_size)
 
     start_time = time.time()
 
@@ -444,94 +475,90 @@ def save_results(performance: Dict[str, Any], args) -> None:
     print(f"\n💾 Results saved to: {results_file}")
 
 
-def main():
-    """Main pipeline execution."""
-    parser = argparse.ArgumentParser(
-        description="Ray Multi-GPU Streaming Pipeline for ML Inference",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Auto-discover and use all healthy GPUs
-  python run_streaming_pipeline.py --total-samples 2000 --enable-profiling
-
-  # High throughput test with limited actors
-  python run_streaming_pipeline.py --max-actors 4 --num-producers 8 --batches-per-producer 20
-
-  # Quick test with small data (auto-scale)
-  python run_streaming_pipeline.py --batch-size 2 --tensor-size 64 --verbose
-
-  # Save results for analysis
-  python run_streaming_pipeline.py --output-dir ./results --verbose
-
-  # Enable NSys profiling with specific actor count
-  python run_streaming_pipeline.py --max-actors 2 --enable-profiling --verbose
-
-  # Performance test requiring at least 3 GPUs
-  python run_streaming_pipeline.py --min-gpus 3 --enable-profiling --batches-per-producer 10
-  
-  # Production mode with validation skipped for faster startup
-  python run_streaming_pipeline.py --skip-gpu-validation --total-samples 10000
-        """
-    )
-
-    # Core pipeline parameters
-    parser.add_argument('--max-actors', type=int, default=None,
-                       help='Maximum number of GPU actors to create (default: use all healthy GPUs)')
-    parser.add_argument('--num-producers', type=int, default=4,
-                       help='Number of data producer tasks (default: 4)')
-    parser.add_argument('--batches-per-producer', type=int, default=5,
-                       help='Batches each producer generates (default: 5)')
-    parser.add_argument('--total-samples', type=int, default=None,
-                       help='Total number of samples to generate (overrides num-producers * batches-per-producer * batch-size)')
-    parser.add_argument('--batch-size', type=int, default=4,
-                       help='Number of samples per batch (default: 4)')
-
-    # Data parameters  
-    parser.add_argument('--tensor-size', type=int, default=224,
-                       help='Height/width of generated tensors (default: 224)')
-    parser.add_argument('--inter-batch-delay', type=float, default=0.1,
-                       help='Delay between batches in seconds (default: 0.1)')
-
+def config_to_args(cfg: DictConfig) -> argparse.Namespace:
+    """Convert Hydra config to argparse.Namespace for backward compatibility."""
+    args = argparse.Namespace()
+    
+    # Runtime parameters
+    runtime = cfg.streaming.runtime
+    args.max_actors = runtime.max_actors
+    args.num_producers = runtime.num_producers
+    args.batches_per_producer = runtime.batches_per_producer
+    args.total_samples = runtime.total_samples
+    args.batch_size = runtime.batch_size
+    args.inter_batch_delay = runtime.inter_batch_delay
+    
     # System parameters
-    parser.add_argument('--min-gpus', type=int, default=1,
-                       help='Minimum healthy GPUs required (default: 1)')
-    parser.add_argument('--skip-gpu-validation', action='store_true',
-                       help='Skip GPU health validation (faster startup for production clusters)')
-
+    system = cfg.streaming.system
+    args.min_gpus = system.min_gpus
+    args.skip_gpu_validation = system.skip_gpu_validation
+    args.verify_actors = system.verify_actors
+    
+    # Data parameters
+    data = cfg.streaming.data
+    args.tensor_channels = data.tensor_channels
+    args.tensor_size = data.tensor_size
+    args.tensor_height = data.tensor_height
+    args.tensor_width = data.tensor_width
+    
     # Processing options
-    parser.add_argument('--no-compute', action='store_true',
-                       help='Use no-op mode for speed testing (depth=0)')
-    parser.add_argument('--no-pin-memory', action='store_true',
-                       help='Disable pinned memory for compatibility')
-    parser.add_argument('--verify-actors', action='store_true', default=True,
-                       help='Verify actor health after creation')
-
+    processing = cfg.streaming.processing
+    args.no_compute = processing.no_compute
+    args.no_pin_memory = processing.no_pin_memory
+    
+    # Output options
+    output = cfg.streaming.output
+    args.output_dir = output.output_dir
+    args.verbose = output.verbose
+    args.quiet = output.quiet
+    
     # Profiling options
-    parser.add_argument('--enable-profiling', action='store_true',
-                       help='Enable nsys profiling for GPU actors (files saved to Ray logs directory)')
+    profiling = cfg.streaming.profiling
+    args.enable_profiling = profiling.enable_profiling
+    
+    # Model parameters from Hydra config
+    args.vit_patch_size = cfg.vit.patch_size
+    args.vit_depth = cfg.vit.depth
+    args.vit_heads = cfg.vit.heads
+    args.vit_dim = cfg.vit.dim
+    args.vit_mlp_dim = cfg.vit.mlp_dim
+    args.vit_channels = cfg.vit.channels
+    args.vit_dropout = cfg.vit.get('dropout', 0.0)
+    args.vit_emb_dropout = cfg.vit.get('emb_dropout', 0.0)
+    
+    # Performance settings
+    args.pin_memory = cfg.performance.pin_memory
+    args.compile_model = cfg.performance.compile_model
+    args.compile_mode = cfg.performance.compile_mode
+    
+    return args
 
-    # Output and debugging
-    parser.add_argument('--output-dir', type=str, default=None,
-                       help='Directory to save results (optional)')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                       help='Enable detailed logging')
-    parser.add_argument('--quiet', '-q', action='store_true',
-                       help='Minimal output (overrides --verbose)')
 
-    args = parser.parse_args()
+@hydra.main(version_base=None, config_path="conf", config_name="streaming_config")
+def hydra_main(cfg: DictConfig) -> None:
+    """Hydra-based main entry point for streaming pipeline."""
+    
+    # Print configuration if verbose
+    if cfg.streaming.output.verbose:
+        print("🔧 Configuration:")
+        print(OmegaConf.to_yaml(cfg))
+        print("=" * 50)
+    
+    # Convert config to args for backward compatibility
+    args = config_to_args(cfg)
+    
+    # Run the existing pipeline logic
+    run_streaming_pipeline_main(args)
 
-    # Set up logging
-    if not args.quiet:
-        setup_logging(args.verbose)
 
+def run_streaming_pipeline_main(args) -> None:
+    """Core streaming pipeline execution logic (shared between Hydra and argparse)."""
     # Validate arguments
     try:
         validate_args(args)
     except ValueError as e:
         print(f"❌ Invalid arguments: {e}")
         sys.exit(1)
-
-    # min_gpus now has a proper default of 1
 
     # Print banner
     if not args.quiet:
@@ -581,5 +608,107 @@ Examples:
         sys.exit(1)
 
 
+def main():
+    """Main pipeline execution."""
+    parser = argparse.ArgumentParser(
+        description="Ray Multi-GPU Streaming Pipeline for ML Inference",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Auto-discover and use all healthy GPUs
+  python run_streaming_pipeline.py --total-samples 2000 --enable-profiling
+
+  # High throughput test with limited actors
+  python run_streaming_pipeline.py --max-actors 4 --num-producers 8 --batches-per-producer 20
+
+  # Quick test with small data (auto-scale)
+  python run_streaming_pipeline.py --batch-size 2 --tensor-size 64 --verbose
+
+  # Save results for analysis
+  python run_streaming_pipeline.py --output-dir ./results --verbose
+
+  # Enable NSys profiling with specific actor count
+  python run_streaming_pipeline.py --max-actors 2 --enable-profiling --verbose
+
+  # Performance test requiring at least 3 GPUs
+  python run_streaming_pipeline.py --min-gpus 3 --enable-profiling --batches-per-producer 10
+  
+  # Production mode with validation skipped for faster startup
+  python run_streaming_pipeline.py --skip-gpu-validation --total-samples 10000
+        """
+    )
+
+    # Core pipeline parameters
+    parser.add_argument('--max-actors', type=int, default=None,
+                       help='Maximum number of GPU actors to create (default: use all healthy GPUs)')
+    parser.add_argument('--num-producers', type=int, default=4,
+                       help='Number of data producer tasks (default: 4)')
+    parser.add_argument('--batches-per-producer', type=int, default=5,
+                       help='Batches each producer generates (default: 5)')
+    parser.add_argument('--total-samples', type=int, default=None,
+                       help='Total number of samples to generate (overrides num-producers * batches-per-producer * batch-size)')
+    parser.add_argument('--batch-size', type=int, default=4,
+                       help='Number of samples per batch (default: 4)')
+
+    # Data parameters  
+    parser.add_argument('--tensor-size', type=int, default=224,
+                       help='Height/width of generated tensors (default: 224)')
+    parser.add_argument('--tensor-channels', type=int, default=3,
+                       help='Number of input channels (default: 3 for RGB)')
+    parser.add_argument('--tensor-height', type=int, default=None,
+                       help='Tensor height (default: same as tensor-size)')
+    parser.add_argument('--tensor-width', type=int, default=None,
+                       help='Tensor width (default: same as tensor-size)')
+    parser.add_argument('--inter-batch-delay', type=float, default=0.1,
+                       help='Delay between batches in seconds (default: 0.1)')
+
+    # System parameters
+    parser.add_argument('--min-gpus', type=int, default=1,
+                       help='Minimum healthy GPUs required (default: 1)')
+    parser.add_argument('--skip-gpu-validation', action='store_true',
+                       help='Skip GPU health validation (faster startup for production clusters)')
+
+    # Processing options
+    parser.add_argument('--no-compute', action='store_true',
+                       help='Use no-op mode for speed testing (depth=0)')
+    parser.add_argument('--no-pin-memory', action='store_true',
+                       help='Disable pinned memory for compatibility')
+    parser.add_argument('--verify-actors', action='store_true', default=True,
+                       help='Verify actor health after creation')
+
+    # Profiling options
+    parser.add_argument('--enable-profiling', action='store_true',
+                       help='Enable nsys profiling for GPU actors (files saved to Ray logs directory)')
+
+    # Output and debugging
+    parser.add_argument('--output-dir', type=str, default=None,
+                       help='Directory to save results (optional)')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                       help='Enable detailed logging')
+    parser.add_argument('--quiet', '-q', action='store_true',
+                       help='Minimal output (overrides --verbose)')
+
+    args = parser.parse_args()
+
+    # Set up logging
+    if not args.quiet:
+        setup_logging(args.verbose)
+
+    # Use shared pipeline execution logic
+    run_streaming_pipeline_main(args)
+
+
 if __name__ == "__main__":
-    main()
+    # Check if user is trying to use Hydra-style arguments
+    import sys
+    hydra_style_args = any(
+        arg.startswith(('model=', 'experiment=', 'vit.', 'streaming.', '+')) or '=' in arg 
+        for arg in sys.argv[1:]
+    )
+    
+    if hydra_style_args:
+        # Use Hydra main
+        hydra_main()
+    else:
+        # Use argparse main
+        main()

@@ -42,6 +42,9 @@ class VitPipelineActorBase:
         heads: int = 8,
         dim: int = 512,
         mlp_dim: int = 2048,
+        channels: int = None,
+        dropout: float = 0.0,
+        emb_dropout: float = 0.0,
         pin_memory: bool = True,
         compile_model: bool = False,
         compile_mode: str = 'default',
@@ -135,6 +138,9 @@ class VitPipelineActorBase:
             dim=dim,
             mlp_dim=mlp_dim,
             gpu_id=self.gpu_id,
+            channels=channels,
+            dropout=dropout,
+            emb_dropout=emb_dropout,
             compile_model=compile_model,
             compile_mode=compile_mode
         )

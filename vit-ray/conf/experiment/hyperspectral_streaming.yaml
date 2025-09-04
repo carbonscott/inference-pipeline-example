@@ -1,0 +1,27 @@
+# @package _global_
+# Hyperspectral data streaming (8-channel input)
+defaults:
+  - override /model: vit_small
+
+# 8-channel hyperspectral configuration
+vit:
+  channels: 8
+  
+# Hyperspectral tensor shape
+shape: [8, 224, 224]
+
+# Streaming configuration for specialized data
+streaming:
+  runtime:
+    batch_size: 4  # Smaller batches due to 8x data per sample
+    num_producers: 4
+    batches_per_producer: 16
+    
+  data:
+    tensor_channels: 8
+    tensor_size: 224
+
+# Conservative performance settings for unusual data
+performance:
+  compile_model: false  # Avoid compilation issues with unusual channel count
+  pin_memory: true

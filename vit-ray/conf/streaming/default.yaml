@@ -1,0 +1,37 @@
+# Default streaming pipeline configuration
+# Runtime parameters (typically overridden by CLI)
+runtime:
+  max_actors: null  # Auto-scale to available healthy GPUs
+  num_producers: 4
+  batches_per_producer: 5
+  total_samples: null  # Use producers * batches_per_producer * batch_size
+  batch_size: 4
+  inter_batch_delay: 0.1
+
+# System parameters
+system:
+  min_gpus: 1
+  skip_gpu_validation: false
+  verify_actors: true
+
+# Data parameters  
+data:
+  tensor_channels: 3
+  tensor_size: 224  # Height and width
+  tensor_height: null  # Override height (default: same as tensor_size)
+  tensor_width: null   # Override width (default: same as tensor_size)
+
+# Processing options
+processing:
+  no_compute: false  # Use no-op mode for speed testing
+  no_pin_memory: false
+
+# Output and debugging
+output:
+  output_dir: null
+  verbose: false
+  quiet: false
+
+# Profiling options
+profiling:
+  enable_profiling: false

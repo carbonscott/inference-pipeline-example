@@ -1,0 +1,15 @@
+# @package _global_
+# ViT-Micro model configuration
+# Ultra-lightweight for testing and debugging
+vit:
+  patch_size: 32
+  depth: 4
+  heads: 4
+  dim: 256
+  mlp_dim: 1024  # 4x dim
+  channels: 3  # RGB input by default
+  dropout: 0.0
+  emb_dropout: 0.0
+
+# Expected parameter count: ~3M
+# Typical use cases: Rapid prototyping, debugging, unit tests

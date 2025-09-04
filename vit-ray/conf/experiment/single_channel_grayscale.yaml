@@ -1,0 +1,14 @@
+# @package _global_
+# Single channel grayscale image processing
+defaults:
+  - override /model: vit_small
+
+# Override channels for grayscale input
+vit:
+  channels: 1
+
+# Corresponding tensor shape for single channel
+shape: [1, 224, 224]
+
+performance:
+  compile_model: false

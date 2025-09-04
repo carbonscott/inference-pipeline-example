@@ -1,0 +1,25 @@
+# @package _global_  
+# High-throughput production configuration
+defaults:
+  - override /model: vit_base
+
+# Production-scale streaming parameters
+streaming:
+  runtime:
+    batch_size: 32  # Large batches for throughput
+    num_producers: 16  # Many producers for high data generation rate
+    batches_per_producer: 64  # Many batches
+    inter_batch_delay: 0.01  # Minimal delay for max throughput
+    
+  system:
+    min_gpus: 2  # Require at least 2 GPUs
+    verify_actors: true
+    
+  data:
+    tensor_size: 224  # Standard ImageNet size
+
+# Performance optimizations
+performance:
+  compile_model: true
+  compile_mode: reduce-overhead  # Optimized for production
+  pin_memory: true

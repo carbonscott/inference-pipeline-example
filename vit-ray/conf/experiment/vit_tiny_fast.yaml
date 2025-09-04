@@ -1,0 +1,12 @@
+# @package _global_
+# ViT-Tiny model for fast prototyping and testing
+defaults:
+  - override /model: vit_tiny
+
+# Small test configuration
+num_samples: 100
+batch_size: 8
+warmup_samples: 20
+
+performance:
+  compile_model: false

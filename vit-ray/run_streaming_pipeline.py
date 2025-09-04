@@ -14,17 +14,17 @@ Features:
 - Fail-fast error handling (no CPU fallback)
 
 Example Usage:
-    # Run with 2 GPUs, 4 data producers, small tensors
-    python run_streaming_pipeline.py --num-gpus 2 --num-producers 4 --tensor-size 64
+    # Auto-discover and use all healthy GPUs with 4 data producers, small tensors
+    python run_streaming_pipeline.py --num-producers 4 --tensor-size 64
 
-    # Run with custom configuration
-    python run_streaming_pipeline.py --num-gpus 4 --batch-size 8 --batches-per-producer 10 --verbose
+    # Limit to 2 actors max with custom configuration
+    python run_streaming_pipeline.py --max-actors 2 --batch-size 8 --batches-per-producer 10 --verbose
 
     # Generate lots of data for throughput testing  
     python run_streaming_pipeline.py --num-producers 8 --batches-per-producer 25 --inter-batch-delay 0.05
 
-    # Enable NSys profiling for performance analysis
-    python run_streaming_pipeline.py --num-gpus 2 --enable-profiling
+    # Enable NSys profiling for performance analysis (auto-scale GPUs)
+    python run_streaming_pipeline.py --enable-profiling
 """
 
 import argparse
@@ -64,8 +64,11 @@ def print_banner():
 
 def validate_args(args) -> None:
     """Validate command line arguments."""
-    if args.num_gpus <= 0:
-        raise ValueError("--num-gpus must be positive")
+    if args.max_actors is not None and args.max_actors <= 0:
+        raise ValueError("--max-actors must be positive")
+
+    if args.min_gpus <= 0:
+        raise ValueError("--min-gpus must be positive")
 
     if args.num_producers <= 0:
         raise ValueError("--num-producers must be positive")
@@ -106,7 +109,7 @@ def setup_gpu_environment(min_gpus: int, verbose: bool = False) -> List[int]:
         print("\n💡 Troubleshooting:")
         print("   - Ensure CUDA is available: nvidia-smi")
         print("   - Check for GPU hardware issues")
-        print("   - Try reducing --min-gpus or --num-gpus")
+        print("   - Try reducing --min-gpus or --max-actors")
         sys.exit(1)
 
 
@@ -124,9 +127,11 @@ def setup_ray_cluster(args) -> None:
             print(f"   Available GPUs: {gpu_count}")
             print(f"   CPU cores: {int(cluster_resources.get('CPU', 0))}")
 
-            if gpu_count < args.num_gpus:
-                print(f"⚠️  Warning: Requested {args.num_gpus} GPUs but only {gpu_count} available")
-                print(f"   Will create {min(args.num_gpus, gpu_count)} actors")
+            print(f"   Ray cluster GPU resources: {gpu_count}")
+            if args.max_actors:
+                print(f"   Will create up to {args.max_actors} actors (user limit)")
+            else:
+                print(f"   Will auto-scale to use all healthy GPUs")
 
         except Exception as e:
             print(f"❌ Ray initialization failed: {e}")
@@ -139,15 +144,29 @@ def setup_ray_cluster(args) -> None:
         print(f"   Available GPUs: {gpu_count}")
         print(f"   CPU cores: {int(cluster_resources.get('CPU', 0))}")
 
-        if gpu_count < args.num_gpus:
-            print(f"⚠️  Warning: Requested {args.num_gpus} GPUs but only {gpu_count} available")
-            print(f"   Will create {min(args.num_gpus, gpu_count)} actors")
+        print(f"   Ray cluster GPU resources: {gpu_count}")
+        if args.max_actors:
+            print(f"   Will create up to {args.max_actors} actors (user limit)")
+        else:
+            print(f"   Will auto-scale to use all healthy GPUs")
 
 
-def create_gpu_actors(args, actual_num_gpus: int) -> List[Any]:
-    """Create GPU pipeline actors with optional profiling."""
+def create_gpu_actors(args, healthy_gpus: List[int]) -> List[Any]:
+    """Create GPU pipeline actors with automatic scaling based on healthy GPUs."""
+    # Determine actual number of actors to create
+    max_possible_actors = len(healthy_gpus)
+    actual_num_actors = max_possible_actors
+    
+    if args.max_actors is not None:
+        actual_num_actors = min(args.max_actors, max_possible_actors)
+        if args.max_actors > max_possible_actors:
+            print(f"⚠️  Requested {args.max_actors} actors but only {max_possible_actors} healthy GPUs available")
+    
     profiling_text = " (with profiling)" if args.enable_profiling else ""
-    print(f"\n🎭 Step 3: Creating {actual_num_gpus} GPU Pipeline Actors{profiling_text}")
+    print(f"\n🎭 Step 3: Creating {actual_num_actors} GPU Pipeline Actors{profiling_text}")
+    print(f"   Available healthy GPUs: {max_possible_actors}")
+    if args.max_actors:
+        print(f"   User-specified actor limit: {args.max_actors}")
 
     if args.enable_profiling and args.verbose:
         print("   📊 NSys profiling enabled - profile files will be generated per actor")
@@ -158,17 +177,17 @@ def create_gpu_actors(args, actual_num_gpus: int) -> List[Any]:
 
     try:
         actors = create_pipeline_actors(
-            num_actors=actual_num_gpus,
+            num_actors=actual_num_actors,
             enable_profiling=args.enable_profiling,
             validate_gpus=False,  # Already validated at system level
             # Pipeline configuration
             tensor_shape=tensor_shape,
             batch_size=args.batch_size,
             patch_size=16,
-            depth=0 if args.no_compute else 2,  # No-op vs real compute
-            heads=4,
-            dim=128,
-            mlp_dim=256,
+            depth=0 if args.no_compute else 6,  # No-op vs meaningful GPU compute
+            heads=8,
+            dim=384,
+            mlp_dim=1536,
             deterministic=True,
             pin_memory=not args.no_pin_memory
         )
@@ -205,10 +224,25 @@ def create_gpu_actors(args, actual_num_gpus: int) -> List[Any]:
 def generate_streaming_data(args) -> List[Any]:
     """Generate streaming data using Ray tasks."""
     print(f"\n📊 Step 4: Generating Streaming Data")
+    
+    # Calculate actual production parameters based on total_samples if provided
+    if args.total_samples is not None:
+        # Calculate required batches to reach total_samples
+        total_batches_needed = (args.total_samples + args.batch_size - 1) // args.batch_size
+        batches_per_producer = max(1, total_batches_needed // args.num_producers)
+        # Adjust if we need more producers or batches
+        if total_batches_needed > args.num_producers * batches_per_producer:
+            batches_per_producer += 1
+        print(f"   Using --total-samples={args.total_samples}")
+        print(f"   Adjusted batches per producer: {batches_per_producer}")
+    else:
+        batches_per_producer = args.batches_per_producer
+        
     print(f"   Producers: {args.num_producers}")
-    print(f"   Batches per producer: {args.batches_per_producer}")
-    print(f"   Total batches: {args.num_producers * args.batches_per_producer}")
+    print(f"   Batches per producer: {batches_per_producer}")
+    print(f"   Total batches: {args.num_producers * batches_per_producer}")
     print(f"   Batch size: {args.batch_size} samples")
+    print(f"   Total samples: {args.num_producers * batches_per_producer * args.batch_size}")
     print(f"   Tensor shape: (3, {args.tensor_size}, {args.tensor_size})")
 
     manager = RayDataProducerManager()
@@ -219,7 +253,7 @@ def generate_streaming_data(args) -> List[Any]:
     try:
         producer_futures = manager.launch_producers(
             num_producers=args.num_producers,
-            batches_per_producer=args.batches_per_producer,
+            batches_per_producer=batches_per_producer,
             batch_size=args.batch_size,
             tensor_shape=tensor_shape,
             inter_batch_delay=args.inter_batch_delay,
@@ -361,7 +395,8 @@ def print_results(performance: Dict[str, Any], args) -> None:
     # Configuration summary
     if args.verbose:
         print(f"\n⚙️  Configuration Used:")
-        print(f"   GPUs: {args.num_gpus}")
+        print(f"   Actor limit: {'auto-scale' if args.max_actors is None else args.max_actors}")
+        print(f"   Min GPUs required: {args.min_gpus}")
         print(f"   Producers: {args.num_producers}")
         print(f"   Batch size: {args.batch_size}")
         print(f"   Tensor size: {args.tensor_size}x{args.tensor_size}")
@@ -402,33 +437,35 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic usage with 2 GPUs
-  python run_streaming_pipeline.py --num-gpus 2
+  # Auto-discover and use all healthy GPUs
+  python run_streaming_pipeline.py --total-samples 2000 --enable-profiling
 
-  # High throughput test
-  python run_streaming_pipeline.py --num-gpus 4 --num-producers 8 --batches-per-producer 20
+  # High throughput test with limited actors
+  python run_streaming_pipeline.py --max-actors 4 --num-producers 8 --batches-per-producer 20
 
-  # Quick test with small data
-  python run_streaming_pipeline.py --num-gpus 1 --batch-size 2 --tensor-size 64 --verbose
+  # Quick test with small data (auto-scale)
+  python run_streaming_pipeline.py --batch-size 2 --tensor-size 64 --verbose
 
   # Save results for analysis
-  python run_streaming_pipeline.py --num-gpus 2 --output-dir ./results --verbose
+  python run_streaming_pipeline.py --output-dir ./results --verbose
 
-  # Enable NSys profiling (files saved to Ray logs directory)
-  python run_streaming_pipeline.py --num-gpus 2 --enable-profiling --verbose
+  # Enable NSys profiling with specific actor count
+  python run_streaming_pipeline.py --max-actors 2 --enable-profiling --verbose
 
-  # Performance test with profiling
-  python run_streaming_pipeline.py --num-gpus 4 --enable-profiling --batches-per-producer 10 --batch-size 8
+  # Performance test requiring at least 3 GPUs
+  python run_streaming_pipeline.py --min-gpus 3 --enable-profiling --batches-per-producer 10
         """
     )
 
     # Core pipeline parameters
-    parser.add_argument('--num-gpus', type=int, default=2,
-                       help='Number of GPU actors to create (default: 2)')
+    parser.add_argument('--max-actors', type=int, default=None,
+                       help='Maximum number of GPU actors to create (default: use all healthy GPUs)')
     parser.add_argument('--num-producers', type=int, default=4,
                        help='Number of data producer tasks (default: 4)')
     parser.add_argument('--batches-per-producer', type=int, default=5,
                        help='Batches each producer generates (default: 5)')
+    parser.add_argument('--total-samples', type=int, default=None,
+                       help='Total number of samples to generate (overrides num-producers * batches-per-producer * batch-size)')
     parser.add_argument('--batch-size', type=int, default=4,
                        help='Number of samples per batch (default: 4)')
 
@@ -439,8 +476,8 @@ Examples:
                        help='Delay between batches in seconds (default: 0.1)')
 
     # System parameters
-    parser.add_argument('--min-gpus', type=int, default=None,
-                       help='Minimum healthy GPUs required (default: same as --num-gpus)')
+    parser.add_argument('--min-gpus', type=int, default=1,
+                       help='Minimum healthy GPUs required (default: 1)')
 
     # Processing options
     parser.add_argument('--no-compute', action='store_true',
@@ -475,9 +512,7 @@ Examples:
         print(f"❌ Invalid arguments: {e}")
         sys.exit(1)
 
-    # Set default min_gpus if not specified
-    if args.min_gpus is None:
-        args.min_gpus = args.num_gpus
+    # min_gpus now has a proper default of 1
 
     # Print banner
     if not args.quiet:
@@ -488,13 +523,12 @@ Examples:
     try:
         # Step 1: GPU Environment Setup
         healthy_gpus = setup_gpu_environment(args.min_gpus, args.verbose)
-        actual_num_gpus = min(args.num_gpus, len(healthy_gpus))
 
         # Step 2: Ray Cluster Setup  
         setup_ray_cluster(args)
 
         # Step 3: Create GPU Actors
-        actors = create_gpu_actors(args, actual_num_gpus)
+        actors = create_gpu_actors(args, healthy_gpus)
 
         # Step 4: Generate Streaming Data
         all_batches = generate_streaming_data(args)

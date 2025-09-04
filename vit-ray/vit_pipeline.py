@@ -171,6 +171,13 @@ class DoubleBufferedPipeline:
 
         # Check if model is None (no-op mode)
         self.is_noop = (self.model is None)
+        
+        # CRITICAL: Explicit CUDA device management for pipeline
+        # Force device context establishment
+        torch.cuda.set_device(gpu_id)
+        
+        # Verify GPU memory allocation capability (silent verification)
+        initial_memory = torch.cuda.memory_allocated(gpu_id)
 
         # Create CUDA streams for pipeline stages
         self.h2d_stream = torch.cuda.Stream(device=gpu_id)
@@ -246,32 +253,33 @@ class DoubleBufferedPipeline:
         h2d_event = self.h2d_done_event[self.current]
         compute_event = self.compute_done_event[self.current]
 
-        with torch.cuda.stream(self.compute_stream):
-            with nvtx.range(f"{nvtx_prefix}_compute_batch_{batch_idx}"):
-                # EVENT-BASED: Wait only for THIS buffer's H2D completion
-                self.compute_stream.wait_event(h2d_event)
+        with torch.cuda.device(self.gpu_id):  # Explicit device context
+            with torch.cuda.stream(self.compute_stream):
+                with nvtx.range(f"{nvtx_prefix}_compute_batch_{batch_idx}"):
+                    # EVENT-BASED: Wait only for THIS buffer's H2D completion
+                    self.compute_stream.wait_event(h2d_event)
 
-                if self.is_noop:
-                    # No-op compute: minimal operation for stream ordering
-                    with nvtx.range(f"noop_compute_{batch_idx}"):
-                        # Touch the data to ensure H2D completed and maintain stream dependencies
+                    if self.is_noop:
+                        # No-op compute: minimal operation for stream ordering
+                        with nvtx.range(f"noop_compute_{batch_idx}"):
+                            # Touch the data to ensure H2D completed and maintain stream dependencies
+                            valid_input_slice = gpu_input_buffer[:current_batch_size]
+                            _ = valid_input_slice.sum()  # Minimal compute operation
+                            # For no-op, copy input to output (identity operation)
+                            gpu_output_buffer[:current_batch_size].copy_(valid_input_slice)
+                    else:
+                        # Generic model inference
                         valid_input_slice = gpu_input_buffer[:current_batch_size]
-                        _ = valid_input_slice.sum()  # Minimal compute operation
-                        # For no-op, copy input to output (identity operation)
-                        gpu_output_buffer[:current_batch_size].copy_(valid_input_slice)
-                else:
-                    # Generic model inference
-                    valid_input_slice = gpu_input_buffer[:current_batch_size]
-                    with torch.no_grad():
-                        with nvtx.range(f"{nvtx_prefix}_model_forward_{batch_idx}"):
-                            predictions = self.model(valid_input_slice)
-                            # Store model output in output buffer
-                            gpu_output_buffer[:current_batch_size].copy_(predictions)
-                            # CRITICAL: Force compute completion for CUDA synchronization
-                            _ = predictions.sum()
+                        with torch.no_grad():  # Restored for efficiency
+                            with nvtx.range(f"{nvtx_prefix}_model_forward_{batch_idx}"):
+                                predictions = self.model(valid_input_slice)
+                                # Store model output in output buffer
+                                gpu_output_buffer[:current_batch_size].copy_(predictions)
+                                # CRITICAL: Force compute completion for CUDA synchronization
+                                _ = predictions.sum()
 
-                # Record compute completion event for this specific buffer
-                self.compute_stream.record_event(compute_event)
+                    # Record compute completion event for this specific buffer
+                    self.compute_stream.record_event(compute_event)
 
     def _d2h_transfer(self, batch_idx, current_batch_size, nvtx_prefix):
         """Perform D2H transfer from current buffer (only valid slice)"""

@@ -23,10 +23,16 @@ python run_streaming_pipeline.py
 
 ### Custom Configuration
 
-Specify number of GPUs and data producers:
+Auto-discover and use all healthy GPUs with 8 data producers:
 
 ```bash
-python run_streaming_pipeline.py --num-gpus 4 --num-producers 8
+python run_streaming_pipeline.py --num-producers 8
+```
+
+Limit to 4 actors maximum:
+
+```bash
+python run_streaming_pipeline.py --max-actors 4 --num-producers 8
 ```
 
 ### Verbose Output
@@ -43,9 +49,10 @@ python run_streaming_pipeline.py --verbose
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--num-gpus` | 2 | Number of GPU actors to create |
+| `--max-actors` | None | Maximum number of GPU actors to create (None = use all healthy GPUs) |
 | `--num-producers` | 4 | Number of data producer tasks |
 | `--batches-per-producer` | 5 | Batches each producer generates |
+| `--total-samples` | None | Total samples to generate (overrides producers × batches × batch-size) |
 | `--batch-size` | 4 | Number of samples per batch |
 
 ### Data Parameters
@@ -59,7 +66,7 @@ python run_streaming_pipeline.py --verbose
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--min-gpus` | same as `--num-gpus` | Minimum healthy GPUs required |
+| `--min-gpus` | 1 | Minimum healthy GPUs required |
 
 ### Processing Options
 
@@ -81,11 +88,10 @@ python run_streaming_pipeline.py --verbose
 
 ### 1. Quick Test (Small Scale)
 
-Test the pipeline quickly with minimal resources:
+Test the pipeline quickly with minimal resources (auto-discover GPUs):
 
 ```bash
 python run_streaming_pipeline.py \
-    --num-gpus 1 \
     --batch-size 2 \
     --tensor-size 64 \
     --batches-per-producer 3 \
@@ -94,11 +100,11 @@ python run_streaming_pipeline.py \
 
 ### 2. Performance Testing (Large Scale)
 
-Run high-throughput test with multiple GPUs:
+Run high-throughput test limiting to 4 actors:
 
 ```bash
 python run_streaming_pipeline.py \
-    --num-gpus 4 \
+    --max-actors 4 \
     --num-producers 8 \
     --batches-per-producer 20 \
     --batch-size 8 \
@@ -107,11 +113,10 @@ python run_streaming_pipeline.py \
 
 ### 3. Speed Benchmark (No-Op Mode)
 
-Test pure throughput without actual computation:
+Test pure throughput without actual computation, auto-scale to all GPUs:
 
 ```bash
 python run_streaming_pipeline.py \
-    --num-gpus 4 \
     --no-compute \
     --batch-size 16 \
     --verbose
@@ -119,21 +124,21 @@ python run_streaming_pipeline.py \
 
 ### 4. Results Collection
 
-Save detailed results for analysis:
+Save detailed results for analysis (auto-scale to available GPUs):
 
 ```bash
 python run_streaming_pipeline.py \
-    --num-gpus 2 \
     --output-dir ./results \
     --verbose
 ```
 
 ### 5. Streaming Simulation
 
-Simulate realistic streaming with delays:
+Simulate realistic streaming with delays (ensure at least 2 GPUs):
 
 ```bash
 python run_streaming_pipeline.py \
+    --min-gpus 2 \
     --num-producers 6 \
     --batches-per-producer 15 \
     --inter-batch-delay 0.2 \
@@ -215,7 +220,7 @@ Example output:
 ```
 
 **Solutions:**
-- Reduce `--num-gpus` to match available healthy GPUs
+- Use `--max-actors` to limit actor count to available healthy GPUs
 - Check GPU health: Look for ECC errors in validation output
 - Use `--min-gpus 1` to allow single GPU operation
 
@@ -224,10 +229,10 @@ Example output:
 If GPU 0 is faulty and you need to use other GPUs (1,2,3,etc.), manually exclude GPU 0:
 
 ```bash
-CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7,8,9 python run_streaming_pipeline.py --num-gpus 2 --enable-profiling --verbose
+CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7,8,9 python run_streaming_pipeline.py --enable-profiling --verbose
 ```
 
-This forces the system to only see GPUs 1-9, making them appear as GPU 0-8 to the pipeline.
+This forces the system to only see GPUs 1-9, making them appear as GPU 0-8 to the pipeline. The system will auto-discover and use all healthy visible GPUs.
 
 #### 4. Ray Connection Issues
 ```
@@ -262,7 +267,7 @@ RuntimeError: CUDA out of memory
 ### Debugging Tips
 
 1. **Use `--verbose`** to see detailed execution logs
-2. **Start small** with `--num-gpus 1 --batch-size 2 --tensor-size 64`
+2. **Start small** with `--batch-size 2 --tensor-size 64` (auto-scale GPUs)
 3. **Check GPU health** in the validation phase output
 4. **Monitor Ray dashboard** at http://localhost:8265
 5. **Save results** with `--output-dir` for post-analysis

@@ -12,13 +12,14 @@ vit:
 # High-resolution tensor shape
 shape: [1, 512, 512]          # Single channel, 512x512 spatial
 
-# Streaming configuration optimized for large images
+# Streaming configuration optimized for large-scale processing
 streaming:
   runtime:
-    batch_size: 4             # Smaller batches due to large image size
-    num_producers: 4          # Moderate number of producers
-    batches_per_producer: 10  # 40 total batches for testing
-    total_samples: null       # Use calculated total: 4*4*10 = 160 samples
+    max_actors: 10             # Limit to 4 GPU actors
+    batch_size: 64           # Large batch size for compute load
+    num_producers: 20         # Many producers for high throughput
+    batches_per_producer: 64  # Many batches per producer
+    total_samples: 256000     # Large dataset size
     inter_batch_delay: 0.05   # Moderate streaming rate
     
   data:
@@ -34,6 +35,9 @@ streaming:
   output:
     verbose: true             # Enable detailed output for testing
     quiet: false
+    
+  profiling:
+    enable_profiling: true    # Enable NSys profiling
 
 # Performance settings for high-resolution images
 performance:

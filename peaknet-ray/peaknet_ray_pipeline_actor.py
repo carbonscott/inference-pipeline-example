@@ -19,7 +19,6 @@ import os
 
 # Import existing pipeline components
 from peaknet_pipeline import DoubleBufferedPipeline, create_peaknet_model, get_numa_info, get_gpu_info
-from peaknet_utils import get_peaknet_input_shape, get_peaknet_output_shape
 # GPU health validation now handled at system level before Ray initialization
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -40,9 +39,8 @@ class PeakNetPipelineActorBase:
         self,
         input_shape: Tuple[int, int, int] = (1, 512, 512),
         batch_size: int = 10,
-        yaml_path: str = None,
-        weights_path: str = None,
         peaknet_config: dict = None,
+        weights_path: str = None,
         pin_memory: bool = True,
         compile_model: bool = False,
         compile_mode: str = 'default',
@@ -55,9 +53,8 @@ class PeakNetPipelineActorBase:
         Args:
             input_shape: Input tensor shape (C, H, W)
             batch_size: Batch size for processing
-            yaml_path: Path to PeakNet YAML configuration (legacy)
+            peaknet_config: PeakNet configuration dict with model parameters
             weights_path: Path to PeakNet model weights
-            peaknet_config: Hydra PeakNet configuration dict (new integrated mode)
             pin_memory: Use pinned memory
             compile_model: Whether to compile the model
             compile_mode: Torch compile mode
@@ -113,9 +110,8 @@ class PeakNetPipelineActorBase:
         # Store configuration
         self.input_shape = input_shape
         self.batch_size = batch_size
-        self.yaml_path = yaml_path
-        self.weights_path = weights_path
         self.peaknet_config = peaknet_config
+        self.weights_path = weights_path
         self.pin_memory = pin_memory
         self.deterministic = deterministic
         
@@ -126,27 +122,36 @@ class PeakNetPipelineActorBase:
         logging.info(f"Actor GPU: {self.gpu_info.get('name', 'Unknown')} ({self.gpu_info.get('memory_mb', 0):.0f} MB)")
         logging.info(f"Actor CPU affinity: {self.numa_info.get('cpu_ranges', 'unknown')}")
         
-        # Create PeakNet model
-        self.peaknet_model, model_input_shape, model_output_shape = create_peaknet_model(
-            yaml_path=yaml_path,
-            weights_path=weights_path,
-            gpu_id=self.gpu_id,
-            compile_model=compile_model,
-            compile_mode=compile_mode,
-            hydra_config=peaknet_config
-        )
-        
-        # Calculate shapes for pipeline
-        if self.peaknet_model is None:
-            # No-op mode: output shape same as input shape
+        # Create PeakNet model or use no-op mode
+        if peaknet_config and peaknet_config.get('model'):
+            # PeakNet mode: create actual model
+            from peaknet_utils import create_peaknet_model, get_peaknet_shapes
+            
+            self.peaknet_model = create_peaknet_model(
+                peaknet_config=peaknet_config,
+                weights_path=weights_path,
+                device=f'cuda:{self.gpu_id}'
+            )
+            
+            # Get shapes from configuration
+            model_input_shape, model_output_shape = get_peaknet_shapes(peaknet_config, batch_size=1)
+            self.input_shape = model_input_shape[1:]  # Remove batch dimension
+            self.output_shape = model_output_shape[1:]  # Remove batch dimension
+            logging.info(f"PeakNet mode: input_shape={self.input_shape}, output_shape={self.output_shape}")
+            
+            # Apply model compilation if requested
+            if compile_model:
+                try:
+                    self.peaknet_model = torch.compile(self.peaknet_model, mode=compile_mode)
+                    logging.info(f"Model compilation successful (mode={compile_mode})")
+                except Exception as e:
+                    logging.warning(f"Model compilation failed: {e}")
+        else:
+            # No-op mode: no model, use provided input shape
+            self.peaknet_model = None
             self.input_shape = input_shape
             self.output_shape = input_shape
             logging.info(f"No-op mode: input_shape={self.input_shape}, output_shape={self.output_shape}")
-        else:
-            # PeakNet mode: use shapes from model configuration
-            self.input_shape = model_input_shape
-            self.output_shape = model_output_shape
-            logging.info(f"PeakNet mode: input_shape={self.input_shape}, output_shape={self.output_shape}")
         
         # Create double buffered pipeline - use the same GPU device as assigned to this actor
         pipeline_gpu_id = self.gpu_id
@@ -168,7 +173,7 @@ class PeakNetPipelineActorBase:
             'gpu_id': self.gpu_id,
             'actor_id': f"actor_{self.gpu_id}_{os.getpid()}",
             'model_config': {
-                'yaml_path': yaml_path,
+                'peaknet_config': peaknet_config,
                 'weights_path': weights_path,
                 'input_shape': self.input_shape,
                 'output_shape': self.output_shape
@@ -176,7 +181,7 @@ class PeakNetPipelineActorBase:
         }
         
         logging.info(f"✅ PeakNetPipelineActor initialized successfully on GPU {self.gpu_id}")
-        logging.info(f"Model: yaml_path={yaml_path}, input_shape={self.input_shape}, output_shape={self.output_shape}")
+        logging.info(f"Model: peaknet_config={peaknet_config is not None}, input_shape={self.input_shape}, output_shape={self.output_shape}")
     
     def get_actor_info(self) -> Dict[str, Any]:
         """Return actor information and current statistics."""
@@ -406,7 +411,7 @@ def test_pipeline_actor():
     actor = PeakNetPipelineActor.remote(
         input_shape=(1, 512, 512),
         batch_size=4,
-        yaml_path=None,  # No-op mode for testing
+        peaknet_config=None,  # No-op mode for testing
         deterministic=True
     )
     

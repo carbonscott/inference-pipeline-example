@@ -26,8 +26,8 @@ import os
 # Check for PeakNet availability
 try:
     from peaknet_utils import (
-        PeakNetForProfiling, create_peaknet_for_profiling,
-        get_peaknet_input_shape, get_peaknet_output_shape
+        PeakNetForProfiling, create_peaknet_model as create_peaknet_from_utils,
+        get_peaknet_shapes
     )
     PEAKNET_AVAILABLE = True
 except ImportError:
@@ -115,119 +115,69 @@ def get_gpu_info(gpu_id):
         return {'error': str(e)}
 
 
-def create_peaknet_model(yaml_path, weights_path, gpu_id, compile_model=False, compile_mode='default', hydra_config=None):
+def create_peaknet_model(peaknet_config, weights_path, gpu_id, compile_model=False, compile_mode='default'):
     """
     Create PeakNet model for compute simulation, or None for no-op.
     
     Args:
-        yaml_path: Path to external YAML config (legacy mode)
+        peaknet_config: PeakNet configuration dict with model parameters (None for no-op)
         weights_path: Path to model weights
         gpu_id: GPU device ID
         compile_model: Whether to compile the model
         compile_mode: Compilation mode
-        hydra_config: Hydra configuration dict (new integrated mode)
     
     Returns:
         tuple: (model, input_shape, output_shape) or (None, None, None) for no-op
     """
 
-    # Check if we have a Hydra config with model parameters
-    has_hydra_model_config = (hydra_config is not None and 
-                              hydra_config.get('model') is not None)
-
-    # Handle no-op case (when no config source is available)
-    if not yaml_path and not has_hydra_model_config:
-        print("No-op compute mode: no config specified, skipping PeakNet model creation")
+    # Handle no-op case (when no config is provided)
+    if not peaknet_config or not peaknet_config.get('model'):
+        print("No-op compute mode: no PeakNet config specified, skipping model creation")
         return None, None, None
 
-    # Determine which config mode to use
-    if has_hydra_model_config:
-        print("Using Hydra-integrated PeakNet configuration")
-        return _create_peaknet_from_hydra(hydra_config, weights_path, gpu_id, compile_model, compile_mode)
-    else:
-        print("Using legacy external YAML PeakNet configuration")
-        return _create_peaknet_from_yaml(yaml_path, weights_path, gpu_id, compile_model, compile_mode)
-
-
-def _create_peaknet_from_hydra(hydra_config, weights_path, gpu_id, compile_model, compile_mode):
-    """Create PeakNet model from Hydra configuration."""
+    # Create PeakNet model from Hydra configuration
     try:
-        from peaknet_utils import create_peaknet_from_hydra_config, get_peaknet_shapes_from_hydra_config
-        
-        peaknet_model = create_peaknet_from_hydra_config(
-            hydra_config=hydra_config,
+        peaknet_model = create_peaknet_from_utils(
+            peaknet_config=peaknet_config,
             weights_path=weights_path,
             device=f'cuda:{gpu_id}'
         )
 
-        # Get input and output shapes from Hydra config
-        input_shape, output_shape = get_peaknet_shapes_from_hydra_config(hydra_config, batch_size=1)
+        # Get input and output shapes from config
+        input_shape, output_shape = get_peaknet_shapes(peaknet_config, batch_size=1)
 
         # Remove batch dimension for pipeline usage
         input_shape = input_shape[1:]  # (C, H, W)
         output_shape = output_shape[1:]  # (num_classes, H, W)
-        print(f"[DEBUG] Hydra mode - Input shape: {input_shape}, Output shape: {output_shape}")
+        print(f"[DEBUG] Input shape: {input_shape}, Output shape: {output_shape}")
         
-        return _finalize_peaknet_model(peaknet_model, input_shape, output_shape, gpu_id, compile_model, compile_mode)
+        # COMPREHENSIVE MODEL DEVICE VALIDATION
+        print(f"[DEBUG] Verifying PeakNet model components on GPU...")
+        model_device = next(peaknet_model.parameters()).device
+        print(f"[DEBUG] Overall model device: {model_device}")
         
-    except Exception as e:
-        print(f"Error creating PeakNet model from Hydra config: {e}")
-        return None, None, None
+        # Verify model is on correct GPU
+        assert model_device.type == 'cuda', f"Model not on GPU: {model_device}"
+        assert model_device.index == gpu_id, f"Model on wrong GPU: {model_device}, expected cuda:{gpu_id}"
+        print(f"✓ PeakNet model verified on GPU {gpu_id}")
 
+        # Add torch.compile if requested and available
+        if compile_model and check_torch_compile_available():
+            print(f"Compiling PeakNet model with mode={compile_mode}...")
+            try:
+                # Use specified compilation mode
+                peaknet_model = torch.compile(peaknet_model, mode=compile_mode)
+                print(f"Model compilation successful (mode={compile_mode})")
+            except Exception as e:
+                print(f"Warning: Model compilation failed with mode={compile_mode} ({e}), using non-compiled model")
+        elif compile_model and not check_torch_compile_available():
+            print("Warning: torch.compile not available (requires PyTorch 2.0+), using non-compiled model")
 
-def _create_peaknet_from_yaml(yaml_path, weights_path, gpu_id, compile_model, compile_mode):
-    """Create PeakNet model from external YAML configuration (legacy mode)."""
-    try:
-        from peaknet_utils import create_peaknet_for_profiling, get_peaknet_input_shape, get_peaknet_output_shape
-        
-        peaknet_model = create_peaknet_for_profiling(
-            yaml_path=yaml_path,
-            weights_path=weights_path,
-            device=f'cuda:{gpu_id}'
-        )
-
-        # Get input and output shapes from the YAML config
-        input_shape = get_peaknet_input_shape(yaml_path, batch_size=1)
-        output_shape = get_peaknet_output_shape(yaml_path, batch_size=1)
-
-        # Remove batch dimension for pipeline usage
-        input_shape = input_shape[1:]  # (C, H, W)
-        output_shape = output_shape[1:]  # (num_classes, H, W)
-        print(f"[DEBUG] YAML mode - Input shape: {input_shape}, Output shape: {output_shape}")
-        
-        return _finalize_peaknet_model(peaknet_model, input_shape, output_shape, gpu_id, compile_model, compile_mode)
+        return peaknet_model, input_shape, output_shape
         
     except Exception as e:
-        print(f"Error creating PeakNet model from YAML config: {e}")
+        print(f"Error creating PeakNet model: {e}")
         return None, None, None
-
-
-def _finalize_peaknet_model(peaknet_model, input_shape, output_shape, gpu_id, compile_model, compile_mode):
-    """Common finalization logic for PeakNet models."""
-    
-    # COMPREHENSIVE MODEL DEVICE VALIDATION
-    print(f"[DEBUG] Verifying PeakNet model components on GPU...")
-    model_device = next(peaknet_model.parameters()).device
-    print(f"[DEBUG] Overall model device: {model_device}")
-    
-    # Verify model is on correct GPU
-    assert model_device.type == 'cuda', f"Model not on GPU: {model_device}"
-    assert model_device.index == gpu_id, f"Model on wrong GPU: {model_device}, expected cuda:{gpu_id}"
-    print(f"✓ PeakNet model verified on GPU {gpu_id}")
-
-    # Add torch.compile if requested and available
-    if compile_model and check_torch_compile_available():
-        print(f"Compiling PeakNet model with mode={compile_mode}...")
-        try:
-            # Use specified compilation mode
-            peaknet_model = torch.compile(peaknet_model, mode=compile_mode)
-            print(f"Model compilation successful (mode={compile_mode})")
-        except Exception as e:
-            print(f"Warning: Model compilation failed with mode={compile_mode} ({e}), using non-compiled model")
-    elif compile_model and not check_torch_compile_available():
-        print("Warning: torch.compile not available (requires PyTorch 2.0+), using non-compiled model")
-
-    return peaknet_model, input_shape, output_shape
 
 
 class DoubleBufferedPipeline:
@@ -440,7 +390,7 @@ def run_pipeline_test(
     num_samples=1000,
     batch_size=10,
     warmup_samples=100,
-    yaml_path=None,
+    peaknet_config=None,
     weights_path=None,
     skip_warmup=False,
     deterministic=False,
@@ -453,8 +403,8 @@ def run_pipeline_test(
     Run comprehensive pipeline performance test with double buffering
 
     Simple double buffered pipeline test with synthetic random data.
-    When yaml_path is None, runs in no-op mode testing only H2D/D2H performance.
-    When yaml_path is provided, runs full PeakNet inference pipeline.
+    When peaknet_config is None, runs in no-op mode testing only H2D/D2H performance.
+    When peaknet_config is provided, runs full PeakNet inference pipeline.
     """
 
     # Set deterministic behavior if requested
@@ -480,7 +430,7 @@ def run_pipeline_test(
     print(f"Batch Size: {batch_size}")
     print(f"Total Samples: {num_samples}")
     print(f"Warmup Samples: {warmup_samples if not skip_warmup else 0}")
-    print(f"PeakNet Config: yaml_path={yaml_path}, weights_path={weights_path}")
+    print(f"PeakNet Config: peaknet_config={peaknet_config is not None}, weights_path={weights_path}")
     print(f"Pin Memory: {pin_memory}")
     print(f"Sync Frequency: {sync_frequency}")
     print(f"Deterministic: {deterministic}")
@@ -488,9 +438,9 @@ def run_pipeline_test(
     print("=" * 60)
 
     # Check PeakNet availability for non-no-op mode
-    if yaml_path and not PEAKNET_AVAILABLE:
-        print("ERROR: PeakNet not found and YAML path provided. Make sure peaknet is installed.")
-        print("Or use yaml_path=null for no-op compute mode.")
+    if peaknet_config and not PEAKNET_AVAILABLE:
+        print("ERROR: PeakNet not found and PeakNet config provided. Make sure peaknet is installed.")
+        print("Or use peaknet_config=None for no-op compute mode.")
         sys.exit(1)
 
     # Check GPU availability
@@ -524,7 +474,7 @@ def run_pipeline_test(
 
     # Create PeakNet model separately
     peaknet_model, input_shape, output_shape = create_peaknet_model(
-        yaml_path, weights_path, gpu_id, compile_model, compile_mode
+        peaknet_config, weights_path, gpu_id, compile_model, compile_mode
     )
 
     # Calculate input and output shapes

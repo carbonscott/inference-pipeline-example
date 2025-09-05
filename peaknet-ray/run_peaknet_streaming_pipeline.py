@@ -22,7 +22,7 @@ Example Usage:
     python run_peaknet_streaming_pipeline.py experiment=peaknet_production --max-actors 4
     
     # Mix model templates with runtime overrides
-    python run_peaknet_streaming_pipeline.py peaknet.yaml_path=/path/to/config.yaml shape=[1,512,512] --max-actors 4 --total-samples 512000
+    python run_peaknet_streaming_pipeline.py shape=[1,512,512] --max-actors 4 --total-samples 512000
     python run_peaknet_streaming_pipeline.py streaming.runtime.batch_size=16 --enable-profiling
     
     ## Traditional CLI Style (Legacy):
@@ -226,9 +226,8 @@ def create_gpu_actors(cfg: DictConfig, healthy_gpus: List[int]) -> List[Any]:
             input_shape=input_shape,
             batch_size=cfg.streaming.runtime.batch_size,
             # PeakNet configuration from Hydra config
-            yaml_path=cfg.peaknet.yaml_path if not cfg.streaming.processing.no_compute else None,
             weights_path=cfg.peaknet.weights_path,
-            peaknet_config=cfg.peaknet if hasattr(cfg.peaknet, 'model') else None,
+            peaknet_config=cfg.peaknet if (hasattr(cfg.peaknet, 'model') and not cfg.streaming.processing.no_compute) else None,
             compile_model=cfg.performance.compile_model,
             compile_mode=cfg.performance.compile_mode,
             deterministic=True,
@@ -517,7 +516,7 @@ def run_streaming_pipeline_main(cfg: DictConfig) -> None:
         print_banner()
         if cfg.streaming.output.verbose:
             print(f"Configuration summary:")
-            print(f"  Model: PeakNet from {cfg.peaknet.yaml_path}")
+            print(f"  Model: PeakNet (Hydra config: {hasattr(cfg.peaknet, 'model')})")
             print(f"  Data: {cfg.streaming.data.input_channels} channels, {cfg.streaming.data.input_size}px")
             print(f"  Runtime: {cfg.streaming.runtime.batch_size} batch, {cfg.streaming.runtime.num_producers} producers")
 

@@ -12,11 +12,11 @@ shape: [1, 1920, 1920]
 streaming:
   runtime:
     max_actors: 4           # Multi-GPU profiling
-    batch_size: 4           # Reasonable for large images
+    batch_size: 16          # Reasonable for large images
     num_producers: 8        # Multiple producers for throughput
     batches_per_producer: 32 # 32 * 8 producers = 256 batches total
-    total_samples: 1000     # Sufficient for profiling (overrides calculated total)
-    inter_batch_delay: 0.05 # Moderate streaming rate
+    total_samples: 1024     # Sufficient for profiling (overrides calculated total)
+    inter_batch_delay: 0.01 # Moderate streaming rate
     
   data:
     input_channels: 1       # Single channel grayscale - typical for crystallography

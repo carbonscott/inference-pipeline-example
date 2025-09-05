@@ -1,0 +1,45 @@
+# PeakNet model configuration for 1920x1920 images
+# Integrated Hydra configuration - no external YAML dependency
+
+# Don't use external config files - everything defined here
+yaml_path: null
+weights_path: null
+
+# Complete PeakNet model architecture (extracted from convnext_seg_config.yaml)
+model:
+  from_scratch: false
+  backbone:
+    hf_config:
+      num_channels: 1                    # Single channel grayscale
+      patch_size: 4                      # ConvNext patch size
+      num_stages: 4                      # Number of ConvNext stages
+      hidden_sizes: [96, 192, 384, 768]  # Stage dimensions
+      depths: [3, 3, 9, 3]              # Blocks per stage
+      hidden_act: "gelu"                 # Activation function
+      initializer_range: 0.02            # Weight initialization
+      layer_norm_eps: 1e-12             # Layer norm epsilon
+      drop_path_rate: 0.0               # DropPath rate
+      image_size: 1920                   # KEY: 1920x1920 instead of 512x512
+      out_features: ['stage1', 'stage2', 'stage3', 'stage4']  # Output stages
+      out_indices: null
+  bifpn:
+    num_blocks: 2                        # Number of BiFPN blocks
+    block:
+      base_level: 4                      # Base level for BiFPN
+      num_levels: 4                      # Number of feature levels
+      num_features: 256                  # Feature dimensions
+      up_scale_factor: 2                 # Upsampling factor
+      down_scale_factor: 0.5            # Downsampling factor
+      relu_inplace: false               # ReLU inplace operation
+      bn:
+        eps: 1e-05                       # BatchNorm epsilon
+        momentum: 0.1                    # BatchNorm momentum
+      fusion:
+        eps: 1e-05                       # Feature fusion epsilon
+  seg_head:
+    num_classes: 2                       # Background + Peak classes
+    num_groups: 32                       # GroupNorm groups
+    out_channels: 256                    # Output channels
+    base_scale_factor: 2                 # Base upsampling factor
+    uses_learned_upsample: false         # Use learned vs bilinear upsampling
+    up_scale_factor: [4, 8, 16, 32]     # Multi-scale upsampling factors

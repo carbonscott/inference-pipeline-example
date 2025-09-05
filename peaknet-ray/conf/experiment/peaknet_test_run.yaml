@@ -1,0 +1,43 @@
+# @package _global_
+# PeakNet test run with 1920x1920 images, real model, and profiling enabled
+defaults:
+  - override /peaknet: peaknet_1920  # Use integrated 1920x1920 Hydra config
+
+# No external config files needed - everything integrated in Hydra
+# peaknet_1920.yaml contains full model architecture with image_size: 1920
+
+# Full resolution as requested
+shape: [1, 1920, 1920]
+
+streaming:
+  runtime:
+    max_actors: 4           # Multi-GPU profiling
+    batch_size: 4           # Reasonable for large images
+    num_producers: 8        # Multiple producers for throughput
+    batches_per_producer: 32 # 32 * 8 producers = 256 batches total
+    total_samples: 1000     # Sufficient for profiling (overrides calculated total)
+    inter_batch_delay: 0.05 # Moderate streaming rate
+    
+  data:
+    input_channels: 1       # Single channel grayscale - typical for crystallography
+    input_size: 1920        # Full 1920x1920 resolution
+    input_height: null      # Use default (input_size)
+    input_width: null       # Use default (input_size)
+    
+  system:
+    min_gpus: 1             # Minimum GPUs required
+    verify_actors: true     # Verify GPU health
+    skip_gpu_validation: false
+    
+  output:
+    verbose: true           # Detailed output for analysis
+    quiet: false
+    output_dir: null        # Can be set to save results
+    
+  profiling:
+    enable_profiling: true  # NSys profiling enabled for performance analysis
+
+performance:
+  compile_model: false      # Avoid compilation for testing
+  pin_memory: true         # Better GPU transfer performance
+  compile_mode: default
